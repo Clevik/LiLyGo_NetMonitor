@@ -109,23 +109,33 @@ void uiShowMain(const Telemetry &t) {
   if (t.dataValid) {
     g_canvas->setTextSize(4);
     g_canvas->setTextColor(t.linkUp ? CLR_STATUS_UP : CLR_STATUS_DN);
-    g_canvas->setCursor(300, ZONE_A_Y + 10);
-    g_canvas->print(t.linkUp ? "UP" : "DOWN");
+    if (t.linkUp) {
+      g_canvas->setCursor(260, ZONE_A_Y + 21);
+      g_canvas->print(" UP ");
+    } else {
+      g_canvas->setCursor(240, ZONE_A_Y + 21);
+      g_canvas->print("DOWN");
+    }
   } else {
     g_canvas->setTextSize(4);
     g_canvas->setTextColor(CLR_DIM);
-    g_canvas->setCursor(300, ZONE_A_Y + 10);
-    g_canvas->print("--");
+    g_canvas->setCursor(240, ZONE_A_Y + 21);
+    g_canvas->print("----");
   }
 
   g_canvas->setTextSize(3);
   g_canvas->setTextColor(CLR_PING);
-  g_canvas->setCursor(430, ZONE_A_Y + 4);
+  const char *pingStr = (t.pingValid) ? nullptr : "-- ms";
   if (t.pingValid) {
-    snprintf(g_fmtBuf, sizeof(g_fmtBuf), "%ums", t.pingMs);
-    g_canvas->print(g_fmtBuf);
-  } else {
-    g_canvas->print("-- ms");
+    snprintf(g_fmtBuf, sizeof(g_fmtBuf), "%u ms", t.pingMs);
+    pingStr = g_fmtBuf;
+  }
+  {
+    int len = 0;
+    for (const char *p = pingStr; *p; ++p) len++;
+    int16_t px = SCREEN_W - len * 18 - 8;
+    g_canvas->setCursor(px, ZONE_A_Y + 26);
+    g_canvas->print(pingStr);
   }
 
   g_canvas->drawFastHLine(0, ZONE_A_Y + ZONE_A_H - 1, SCREEN_W, CLR_DIM);

@@ -6,6 +6,7 @@
 #include "display/ui.h"
 #include "portal/portal.h"
 #include "net/ota.h"
+#include "net/telemetry.h"
 
 enum class AppState : uint8_t {
   Boot,
@@ -28,6 +29,7 @@ static void enterState(AppState next) {
   }
   if (g_state == AppState::Running && next != AppState::Running) {
     otaEnd();
+    telemetryStop();
   }
 
   g_state = next;
@@ -51,6 +53,7 @@ static void enterState(AppState next) {
       Serial.println("[FSM] -> RUNNING");
       g_lastPollMs = 0;
       otaBegin();
+      telemetryStart(g_settings.pingHost.c_str(), g_settings.updateIntervalSec);
       uiShowMain(g_telemetry);
       break;
 
@@ -71,10 +74,6 @@ static bool keyLongPressed() {
     g_keyDownMs = 0;
   }
   return false;
-}
-
-static void pollTelemetry() {
-  // TODO: SNMP + ping
 }
 
 void setup() {
@@ -142,7 +141,7 @@ void loop() {
       const uint32_t intervalMs = g_settings.updateIntervalSec * 1000UL;
       if (g_lastPollMs == 0 || now - g_lastPollMs >= intervalMs) {
         g_lastPollMs = now;
-        pollTelemetry();
+        g_telemetry = telemetrySnapshot();
         uiUpdateMain(g_telemetry);
       }
       break;
