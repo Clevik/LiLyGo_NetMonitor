@@ -52,8 +52,8 @@ static void enterState(AppState next) {
     case AppState::Running:
       Serial.println("[FSM] -> RUNNING");
       g_lastPollMs = 0;
-      otaBegin();
-      telemetryStart(g_settings.pingHost.c_str(), g_settings.updateIntervalSec);
+      otaBegin(g_settings);
+      telemetryStart(g_settings.pingHost.c_str(), g_settings.pingIntervalSec);
       uiShowMain(g_telemetry);
       break;
 
@@ -133,6 +133,13 @@ void loop() {
     }
 
     case AppState::Running: {
+      if (otaSettingsSaved()) {
+        Serial.println("[OTA] settings saved, restarting telemetry...");
+        SettingsStore::save(g_settings);
+        telemetryStop();
+        telemetryStart(g_settings.pingHost.c_str(), g_settings.pingIntervalSec);
+        g_lastPollMs = 0;
+      }
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[WiFi] lost -> reconnect");
         enterState(AppState::WifiConnect);

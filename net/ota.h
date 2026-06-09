@@ -1,4 +1,7 @@
 #pragma once
 
-void otaBegin();
+#include "settings.h"
+
+void otaBegin(Settings &settings);
 void otaEnd();
+bool otaSettingsSaved();

@@ -31,9 +31,10 @@ struct Settings {
 
   // --- Пинг ---
   String      pingHost       = "8.8.8.8";
+  uint32_t    pingIntervalSec = 5;     // интервал пинга, сек
 
   // --- Обновление / история ---
-  uint32_t    updateIntervalSec = 5;   // период опроса, сек
+  uint32_t    updateIntervalSec = 5;   // период опроса SNMP, сек
   uint16_t    historyPoints     = 120; // точек в графике
 
   // Признак валидной сохранённой конфигурации.

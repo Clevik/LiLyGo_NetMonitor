@@ -69,6 +69,8 @@ small{color:#666;font-size:12px}
 <div class='card'>
 <label>Ping Host</label>
 <input id='ping' value='8.8.8.8'>
+<label>Ping Interval (sec)</label>
+<input id='pintv' type='number' value='5'>
 <label>Update Interval (sec)</label>
 <input id='intv' type='number' value='5'>
 </div>
@@ -104,6 +106,7 @@ function doSave(){
     scom:document.getElementById('scom').value,
     ifidx:+document.getElementById('ifidx').value,
     ping:document.getElementById('ping').value,
+    pintv:+document.getElementById('pintv').value,
     intv:+document.getElementById('intv').value
   };
   if(!d.ssid){alert('Enter SSID');return;}
@@ -159,6 +162,7 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   g_cfg->snmpCommunity    = doc["scom"]   | "public";
   g_cfg->ifIndex          = doc["ifidx"]  | 0;
   g_cfg->pingHost         = doc["ping"]   | "8.8.8.8";
+  g_cfg->pingIntervalSec  = doc["pintv"]  | 5;
   g_cfg->updateIntervalSec = doc["intv"]  | 5;
   g_cfg->configured       = true;
 
