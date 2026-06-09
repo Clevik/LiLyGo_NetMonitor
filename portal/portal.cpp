@@ -76,10 +76,13 @@ small{color:#666;font-size:12px}
 <div id='status'></div>
 <button class='btn' onclick='doSave()'>Save &amp; Connect</button>
 <a class='btn' href='/ota' style='margin-top:8px;background:#555;color:#fff'>Firmware Update (OTA)</a>
-
 <script>
 function scan(){
-  fetch('/scan').then(r=>r.json()).then(nets=>{
+  fetch('/scan').then(r=>{
+    if(r.status===202) return null;
+    return r.json();
+  }).then(nets=>{
+    if(!nets){setTimeout(scan,2000);return;}
     var h='';
     nets.sort((a,b)=>b.rssi-a.rssi);
     nets.forEach(n=>{
@@ -115,22 +118,20 @@ scan();
 </script></body></html>
 )rawliteral";
 
+enum ScanState { IDLE, REQUESTED, DONE };
+static ScanState g_scanState = IDLE;
+static String    g_scanJson;
+
 static void handleScan(AsyncWebServerRequest *req) {
-  int n = WiFi.scanNetworks(false, true);
-  String json = "[";
-  for (int i = 0; i < n; i++) {
-    if (i) json += ",";
-    json += "{\"ssid\":\"";
-    json += WiFi.SSID(i);
-    json += "\",\"rssi\":";
-    json += WiFi.RSSI(i);
-    json += ",\"auth\":";
-    json += WiFi.encryptionType(i);
-    json += "}";
+  if (g_scanState == DONE) {
+    g_scanState = IDLE;
+    req->send(200, "application/json", g_scanJson);
+    return;
   }
-  json += "]";
-  WiFi.scanDelete();
-  req->send(200, "application/json", json);
+  if (g_scanState == IDLE) {
+    g_scanState = REQUESTED;
+  }
+  req->send(202, "application/json", "[\"scanning\"]");
 }
 
 static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
@@ -194,12 +195,21 @@ void portalBegin(Settings &settings) {
     req->send_P(200, "text/html", HTML_PAGE);
   });
   g_http->on("/scan", HTTP_GET, handleScan);
-  g_http->on("/save", HTTP_POST, nullptr, nullptr,
-             [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t, size_t) {
-               handleSave(req, data, len);
-             });
+  g_http->on("/save", HTTP_ANY,
+    [](AsyncWebServerRequest *req) {
+      req->redirect("/");
+    },
+    nullptr,
+    [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t, size_t) {
+      handleSave(req, data, len);
+    }
+  );
   g_http->onNotFound([](AsyncWebServerRequest *req) {
-    req->redirect("http://" + WiFi.softAPIP().toString() + "/");
+    if (req->method() == HTTP_GET) {
+      req->redirect("http://" + WiFi.softAPIP().toString() + "/");
+    } else {
+      req->send(404, "text/plain", "Not found");
+    }
   });
 
   g_http->on("/ota", HTTP_GET, [](AsyncWebServerRequest *req) {
@@ -234,6 +244,25 @@ void portalBegin(Settings &settings) {
 
 void portalLoop() {
   if (g_dns) g_dns->processNextRequest();
+  if (g_scanState == REQUESTED) {
+    int n = WiFi.scanNetworks(false, true, false, 300);
+    String json = "[";
+    for (int i = 0; i < n; i++) {
+      if (i) json += ",";
+      json += "{\"ssid\":\"";
+      json += WiFi.SSID(i);
+      json += "\",\"rssi\":";
+      json += WiFi.RSSI(i);
+      json += ",\"auth\":";
+      json += WiFi.encryptionType(i);
+      json += "}";
+    }
+    json += "]";
+    WiFi.scanDelete();
+    g_scanJson  = json;
+    g_scanState = DONE;
+    Serial.printf("[Portal] scan done, %d networks\n", n);
+  }
 }
 
 bool portalConfigSaved() {
