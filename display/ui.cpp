@@ -124,12 +124,25 @@ void uiShowMain(const Telemetry &t) {
   }
 
   g_canvas->setTextSize(3);
-  g_canvas->setTextColor(CLR_PING);
-  const char *pingStr = (t.pingValid) ? nullptr : "-- ms";
-  if (t.pingValid) {
+
+  const char *pingStr = nullptr;
+  uint16_t pingColor  = CLR_PING;
+
+  if (!t.dataValid) {
+    static const char *frames[] = {"_- ms", "-_ ms", "-- ms"};
+    pingStr  = frames[(millis() / 500) % 3];
+    pingColor = CLR_DIM;
+  } else if (t.pingLoss) {
+    pingStr  = "100% loss";
+    pingColor = CLR_STATUS_DN;
+  } else if (t.pingMs == 0) {
+    pingStr  = "-- ms";
+  } else {
     snprintf(g_fmtBuf, sizeof(g_fmtBuf), "%u ms", t.pingMs);
     pingStr = g_fmtBuf;
   }
+
+  g_canvas->setTextColor(pingColor);
   {
     int len = 0;
     for (const char *p = pingStr; *p; ++p) len++;

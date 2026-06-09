@@ -20,7 +20,7 @@ static Settings   g_settings;
 static Telemetry  g_telemetry;
 
 static uint32_t   g_stateEnteredMs = 0;
-static uint32_t   g_lastPollMs     = 0;
+static uint32_t   g_lastUiMs       = 0;
 static uint32_t   g_keyDownMs      = 0;
 
 static void enterState(AppState next) {
@@ -51,7 +51,7 @@ static void enterState(AppState next) {
 
     case AppState::Running:
       Serial.println("[FSM] -> RUNNING");
-      g_lastPollMs = 0;
+      g_lastUiMs = 0;
       otaBegin(g_settings);
       telemetryStart(g_settings.pingHost.c_str(), g_settings.pingIntervalSec);
       uiShowMain(g_telemetry);
@@ -138,16 +138,15 @@ void loop() {
         SettingsStore::save(g_settings);
         telemetryStop();
         telemetryStart(g_settings.pingHost.c_str(), g_settings.pingIntervalSec);
-        g_lastPollMs = 0;
+        g_lastUiMs = 0;
       }
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[WiFi] lost -> reconnect");
         enterState(AppState::WifiConnect);
         break;
       }
-      const uint32_t intervalMs = g_settings.updateIntervalSec * 1000UL;
-      if (g_lastPollMs == 0 || now - g_lastPollMs >= intervalMs) {
-        g_lastPollMs = now;
+      if (now - g_lastUiMs >= 500) {
+        g_lastUiMs = now;
         g_telemetry = telemetrySnapshot();
         uiUpdateMain(g_telemetry);
       }

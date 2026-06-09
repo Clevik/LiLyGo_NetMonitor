@@ -6,6 +6,7 @@ struct Telemetry {
   bool     linkUp        = false;
   uint32_t pingMs        = 0;
   bool     pingValid     = false;
+  bool     pingLoss      = false;
   double   inMbps        = 0.0;
   double   outMbps       = 0.0;
   uint32_t lastUpdateMs  = 0;

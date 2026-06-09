@@ -25,6 +25,8 @@ static void netTask(void *arg) {
       if (ok) {
         t.pingMs    = (uint32_t)Ping.averageTime();
         t.pingValid = true;
+      } else {
+        t.pingLoss = true;
       }
     }
 
