@@ -17,5 +17,6 @@ bool uiInit();
 void uiShowSplash();
 void uiShowApConfig(const char *apName, const char *apIp);
 void uiShowConnecting(const char *ssid);
+void uiUpdateConnecting();
 void uiShowMain(const Telemetry &t);
 void uiUpdateMain(const Telemetry &t);

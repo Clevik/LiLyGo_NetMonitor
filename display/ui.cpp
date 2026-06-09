@@ -10,6 +10,7 @@ static Arduino_GFX     *g_disp   = nullptr;
 static Arduino_Canvas  *g_canvas = nullptr;
 
 static char g_fmtBuf[32];
+static char g_connectSsid[64];
 
 bool uiInit() {
   pinMode(DISP_PWR_PIN, OUTPUT);
@@ -77,16 +78,36 @@ void uiShowApConfig(const char *apName, const char *apIp) {
 }
 
 void uiShowConnecting(const char *ssid) {
+  strncpy(g_connectSsid, ssid ? ssid : "", sizeof(g_connectSsid) - 1);
+  g_connectSsid[sizeof(g_connectSsid) - 1] = '\0';
+  uiUpdateConnecting();
+}
+
+void uiUpdateConnecting() {
+  static const char *frames[] = {
+    "....", "....", "....", "....", "...."
+  };
+  static const uint8_t active[] = { 0, 1, 2, 3, 4 };
+  uint8_t frame = (millis() / 400) % 5;
+
   g_canvas->fillScreen(CLR_BG);
+
   g_canvas->setTextSize(3);
   g_canvas->setTextColor(CLR_TEXT);
   g_canvas->setCursor(20, 60);
-  g_canvas->print("Connecting...");
+  g_canvas->print("Connecting ");
+
+  for (int i = 0; i < 4; i++) {
+    g_canvas->setTextColor(
+      (frame < 4 && i == active[frame]) ? CLR_PING : CLR_DIM);
+    g_canvas->print(".");
+  }
+
   g_canvas->setTextSize(2);
   g_canvas->setTextColor(CLR_DIM);
   g_canvas->setCursor(20, 110);
   g_canvas->print("SSID: ");
-  g_canvas->print(ssid);
+  g_canvas->print(g_connectSsid);
   flush();
 }
 

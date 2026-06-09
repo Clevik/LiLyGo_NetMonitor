@@ -128,6 +128,8 @@ void loop() {
         Serial.println("[WiFi] connect timeout -> AP_CONFIG");
         WiFi.disconnect(true, true);
         enterState(AppState::ApConfig);
+      } else {
+        uiUpdateConnecting();
       }
       break;
     }
