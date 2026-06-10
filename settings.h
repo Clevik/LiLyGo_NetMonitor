@@ -8,6 +8,18 @@
 
 // Версия схемы конфигурации (для будущих миграций).
 constexpr uint16_t CONFIG_SCHEMA_VERSION = 1;
+constexpr uint32_t SETTINGS_INTERVAL_MIN_SEC = 1;
+constexpr uint32_t SETTINGS_INTERVAL_MAX_SEC = 3600;
+
+inline uint32_t clampSettingsIntervalSec(long value) {
+  if (value < static_cast<long>(SETTINGS_INTERVAL_MIN_SEC)) {
+    return SETTINGS_INTERVAL_MIN_SEC;
+  }
+  if (value > static_cast<long>(SETTINGS_INTERVAL_MAX_SEC)) {
+    return SETTINGS_INTERVAL_MAX_SEC;
+  }
+  return static_cast<uint32_t>(value);
+}
 
 // Поддерживаемые версии SNMP.
 enum class SnmpVersion : uint8_t {

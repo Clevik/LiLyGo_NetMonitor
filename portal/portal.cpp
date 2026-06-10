@@ -69,10 +69,12 @@ small{color:#666;font-size:12px}
 <div class='card'>
 <label>Ping Host</label>
 <input id='ping' value='8.8.8.8'>
-<label>Ping Interval (sec)</label>
-<input id='pintv' type='number' value='5'>
-<label>Update Interval (sec)</label>
-<input id='intv' type='number' value='5'>
+<label>External Ping Interval (sec)</label>
+<input id='pintv' type='number' min='1' max='3600' step='1' value='5'>
+<small>How often to ping the external host for latency and loss.</small>
+<label>SNMP Poll Interval (sec)</label>
+<input id='intv' type='number' min='1' max='3600' step='1' value='5'>
+<small>How often to poll router SNMP status and traffic counters.</small>
 </div>
 
 <div id='status'></div>
@@ -96,9 +98,13 @@ function scan(){
   }).catch(()=>{document.getElementById('wifiList').innerHTML='Scan failed';});
 }
 function pick(s){document.getElementById('ssid').value=s;}
+function validInterval(v){return v>=1&&v<=3600&&Math.floor(v)===v;}
 function doSave(){
   var ifidx=+document.getElementById('ifidx').value;
+  var pintv=+document.getElementById('pintv').value;
+  var intv=+document.getElementById('intv').value;
   if(!ifidx||ifidx<1||Math.floor(ifidx)!==ifidx){alert('Enter Interface Index greater than 0');return;}
+  if(!validInterval(pintv)||!validInterval(intv)){alert('Ping and SNMP intervals must be 1..3600 sec');return;}
   var d={
     ssid:document.getElementById('ssid').value,
     wpass:document.getElementById('wpass').value,
@@ -108,8 +114,8 @@ function doSave(){
     scom:document.getElementById('scom').value,
     ifidx:ifidx,
     ping:document.getElementById('ping').value,
-    pintv:+document.getElementById('pintv').value,
-    intv:+document.getElementById('intv').value
+    pintv:pintv,
+    intv:intv
   };
   if(!d.ssid){alert('Enter SSID');return;}
   var st=document.getElementById('status');
@@ -165,8 +171,10 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   next.snmpCommunity     = doc["scom"]   | "public";
   long ifIndex           = doc["ifidx"]  | 0L;
   next.pingHost          = doc["ping"]   | "8.8.8.8";
-  next.pingIntervalSec   = doc["pintv"]  | 5;
-  next.updateIntervalSec = doc["intv"]   | 5;
+  long pingIntervalSec   = doc["pintv"]  | 5L;
+  long updateIntervalSec = doc["intv"]   | 5L;
+  next.pingIntervalSec   = clampSettingsIntervalSec(pingIntervalSec);
+  next.updateIntervalSec = clampSettingsIntervalSec(updateIntervalSec);
   next.configured        = true;
 
   if (next.wifiSsid.length() == 0) {

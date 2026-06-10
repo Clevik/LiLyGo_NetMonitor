@@ -17,6 +17,10 @@ static Telemetry         g_tel;
 
 static char     g_pingHost[64];
 static uint32_t g_pingIntervalMs = 5000;
+static uint32_t g_snmpIntervalMs = 5000;
+
+static constexpr uint32_t ROUTER_PING_INTERVAL_MS = 5000;
+static constexpr uint32_t NET_TASK_TICK_MS = 100;
 
 static bool     g_snmpReady  = false;
 
@@ -56,6 +60,10 @@ static bool delayOrStop(uint32_t delayMs) {
   return ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(delayMs)) > 0 || !g_running;
 }
 
+static bool intervalDue(uint32_t now, uint32_t lastMs, uint32_t intervalMs) {
+  return lastMs == 0 || now - lastMs >= intervalMs;
+}
+
 static void signalTaskStopped() {
   snmpCleanup();
   g_snmpReady = false;
@@ -69,6 +77,12 @@ static void signalTaskStopped() {
 
 static void netTask(void *arg) {
   Serial.printf("[NetTask] started on core %d\n", xPortGetCoreID());
+  Serial.printf("[NetTask] intervals: snmp=%u ms ping=%u ms router=%u ms\n",
+                g_snmpIntervalMs, g_pingIntervalMs, ROUTER_PING_INTERVAL_MS);
+
+  uint32_t lastSnmpMs = 0;
+  uint32_t lastRouterPingMs = 0;
+  uint32_t lastExternalPingMs = 0;
 
   while (g_running) {
     if (WiFi.status() != WL_CONNECTED) {
@@ -82,34 +96,33 @@ static void netTask(void *arg) {
       snmpInit(g_routerIP, g_snmpPort, g_snmpCommunity,
                g_snmpVersion, g_ifIndex);
       g_snmpReady = true;
-      if (delayOrStop(1000)) break;
+      lastSnmpMs = 0;
+      lastRouterPingMs = 0;
+      lastExternalPingMs = 0;
     }
 
     Telemetry t = g_tel;
-    t.dataValid    = true;
-    t.lastUpdateMs = millis();
-    t.pingMs       = 0;
-    t.pingValid    = false;
-    t.pingLoss     = false;
-    t.linkUncertain = false;
+    bool changed = false;
+    uint32_t now = millis();
 
-    if (g_snmpReady) {
+    if (g_snmpReady && intervalDue(now, lastSnmpMs, g_snmpIntervalMs)) {
+      lastSnmpMs = now;
       SnmpData snmp;
       if (snmpPoll(snmp)) {
         g_snmpFailCount = 0;
         t.linkUp = snmp.linkUp;
 
-        uint32_t now = millis();
+        uint32_t sampleMs = millis();
 
         if (!g_haveSample1) {
           g_s1InOctets  = snmp.inOctets;
           g_s1OutOctets = snmp.outOctets;
-          g_s1Ms        = now;
+          g_s1Ms        = sampleMs;
           g_haveSample1 = true;
         } else {
           g_s2InOctets  = snmp.inOctets;
           g_s2OutOctets = snmp.outOctets;
-          g_s2Ms        = now;
+          g_s2Ms        = sampleMs;
           g_haveSample2 = true;
         }
 
@@ -131,24 +144,50 @@ static void netTask(void *arg) {
       } else {
         g_snmpFailCount++;
       }
+      changed = true;
     }
 
     if (!g_running) break;
 
-    if (Ping.ping(g_routerIP, 1)) {
-      t.routerPingMs    = (uint32_t)Ping.averageTime();
-      t.routerPingValid = true;
+    now = millis();
+    if (intervalDue(now, lastRouterPingMs, ROUTER_PING_INTERVAL_MS)) {
+      lastRouterPingMs = now;
+      if (Ping.ping(g_routerIP, 1)) {
+        t.routerPingMs    = (uint32_t)Ping.averageTime();
+        t.routerPingValid = true;
+      } else {
+        t.routerPingMs    = 0;
+        t.routerPingValid = false;
+      }
+      changed = true;
     }
 
     if (!g_running) break;
 
-    bool ok = Ping.ping(g_pingHost, 3);
-    if (ok) {
-      t.pingMs    = (uint32_t)Ping.averageTime();
-      t.pingValid = true;
-    } else {
-      t.pingLoss = true;
+    now = millis();
+    if (intervalDue(now, lastExternalPingMs, g_pingIntervalMs)) {
+      lastExternalPingMs = now;
+      bool ok = Ping.ping(g_pingHost, 3);
+      if (ok) {
+        t.pingMs    = (uint32_t)Ping.averageTime();
+        t.pingValid = true;
+        t.pingLoss  = false;
+      } else {
+        t.pingMs    = 0;
+        t.pingValid = false;
+        t.pingLoss  = true;
+      }
+      changed = true;
     }
+
+    if (!changed) {
+      if (delayOrStop(NET_TASK_TICK_MS)) break;
+      continue;
+    }
+
+    t.dataValid    = true;
+    t.lastUpdateMs = millis();
+    t.linkUncertain = false;
 
     if (g_snmpFailCount == 0) {
       // статус от SNMP — уже записан
@@ -164,7 +203,7 @@ static void netTask(void *arg) {
       xSemaphoreGive(g_mutex);
     }
 
-    if (delayOrStop(g_pingIntervalMs)) break;
+    if (delayOrStop(NET_TASK_TICK_MS)) break;
   }
 
   signalTaskStopped();
@@ -196,7 +235,8 @@ bool telemetryStart(const Settings &settings) {
 
   strncpy(g_pingHost, settings.pingHost.c_str(), sizeof(g_pingHost) - 1);
   g_pingHost[sizeof(g_pingHost) - 1] = '\0';
-  g_pingIntervalMs = settings.pingIntervalSec * 1000;
+  g_pingIntervalMs = clampSettingsIntervalSec(static_cast<long>(settings.pingIntervalSec)) * 1000UL;
+  g_snmpIntervalMs = clampSettingsIntervalSec(static_cast<long>(settings.updateIntervalSec)) * 1000UL;
 
   g_routerIP.fromString(settings.routerHost);
   g_snmpPort = settings.snmpPort;

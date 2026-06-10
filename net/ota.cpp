@@ -51,17 +51,25 @@ small{color:#666;font-size:12px}
 <div class='card'>
 <label>Ping Host</label>
 <input id='ping' value='{{PING}}'>
-<label>Ping Interval (sec)</label>
-<input id='pintv' type='number' value='{{PINTV}}'>
+<label>External Ping Interval (sec)</label>
+<input id='pintv' type='number' min='1' max='3600' step='1' value='{{PINTV}}'>
+<small>How often to ping the external host for latency and loss.</small>
+<label>SNMP Poll Interval (sec)</label>
+<input id='intv' type='number' min='1' max='3600' step='1' value='{{INTV}}'>
+<small>How often to poll router SNMP status and traffic counters.</small>
 </div>
 <div id='status'></div>
 <button class='btn' onclick='doSave()'>Save</button>
 <a class='btn2' href='/ota'>Firmware Update (OTA)</a>
 <script>
 document.getElementById('sver').value='{{SVER}}';
+function validInterval(v){return v>=1&&v<=3600&&Math.floor(v)===v;}
 function doSave(){
   var ifidx=+document.getElementById('ifidx').value;
+  var pintv=+document.getElementById('pintv').value;
+  var intv=+document.getElementById('intv').value;
   if(!ifidx||ifidx<1||Math.floor(ifidx)!==ifidx){alert('Enter Interface Index greater than 0');return;}
+  if(!validInterval(pintv)||!validInterval(intv)){alert('Ping and SNMP intervals must be 1..3600 sec');return;}
   var d={
     router:document.getElementById('router').value,
     sport:+document.getElementById('sport').value,
@@ -69,7 +77,8 @@ function doSave(){
     scom:document.getElementById('scom').value,
     ifidx:ifidx,
     ping:document.getElementById('ping').value,
-    pintv:+document.getElementById('pintv').value
+    pintv:pintv,
+    intv:intv
   };
   var st=document.getElementById('status');
   st.style.display='block'; st.textContent='Saving...';
@@ -152,6 +161,7 @@ static String buildSettingsPage() {
   html.replace("{{IFIDX}}", g_cfg && g_cfg->ifIndex > 0 ? String(g_cfg->ifIndex) : "");
   html.replace("{{PING}}", g_cfg ? g_cfg->pingHost : "8.8.8.8");
   html.replace("{{PINTV}}", g_cfg ? String(g_cfg->pingIntervalSec) : "5");
+  html.replace("{{INTV}}", g_cfg ? String(g_cfg->updateIntervalSec) : "5");
   return html;
 }
 
@@ -179,7 +189,10 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   next.snmpCommunity   = doc["scom"]   | next.snmpCommunity;
   long ifIndex         = doc["ifidx"]  | static_cast<long>(next.ifIndex);
   next.pingHost        = doc["ping"]   | next.pingHost;
-  next.pingIntervalSec = doc["pintv"]  | next.pingIntervalSec;
+  long pingIntervalSec = doc["pintv"]  | static_cast<long>(next.pingIntervalSec);
+  long updateIntervalSec = doc["intv"] | static_cast<long>(next.updateIntervalSec);
+  next.pingIntervalSec = clampSettingsIntervalSec(pingIntervalSec);
+  next.updateIntervalSec = clampSettingsIntervalSec(updateIntervalSec);
 
   if (ifIndex < 1) {
     req->send(400, "text/plain", "Interface Index must be greater than 0");

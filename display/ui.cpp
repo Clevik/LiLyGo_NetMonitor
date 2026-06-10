@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Arduino_GFX_Library.h>
+#include <esp_heap_caps.h>
+#include <soc/soc_memory_types.h>
 
 #include "config.h"
 #include "ui.h"
@@ -20,6 +22,47 @@ static uint16_t g_histCount = 0;
 static uint16_t g_histHead  = 0;
 static uint32_t g_lastHistMs = 0;
 
+static void logMemoryState(const char *stage) {
+  Serial.printf(
+    "[UI] memory %s: heap free=%u largest=%u min=%u; psram found=%s size=%u free=%u largest=%u min=%u\n",
+    stage,
+    static_cast<unsigned>(ESP.getFreeHeap()),
+    static_cast<unsigned>(ESP.getMaxAllocHeap()),
+    static_cast<unsigned>(ESP.getMinFreeHeap()),
+    psramFound() ? "yes" : "no",
+    static_cast<unsigned>(ESP.getPsramSize()),
+    static_cast<unsigned>(ESP.getFreePsram()),
+    static_cast<unsigned>(ESP.getMaxAllocPsram()),
+    static_cast<unsigned>(ESP.getMinFreePsram()));
+  Serial.printf(
+    "[UI] heap caps %s: internal free=%u largest=%u; spiram free=%u largest=%u\n",
+    stage,
+    static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+    static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+    static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+    static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+}
+
+static void logCanvasFramebuffer(const char *stage) {
+  if (!g_canvas) {
+    Serial.printf("[UI] canvas %s: object is null\n", stage);
+    return;
+  }
+
+  uint16_t *fb = g_canvas->getFramebuffer();
+  if (!fb) {
+    Serial.printf("[UI] canvas %s: framebuffer is null\n", stage);
+    return;
+  }
+
+  Serial.printf(
+    "[UI] canvas %s: framebuffer=%p allocated=%u bytes location=%s\n",
+    stage,
+    fb,
+    static_cast<unsigned>(heap_caps_get_allocated_size(fb)),
+    esp_ptr_external_ram(fb) ? "PSRAM" : (esp_ptr_internal(fb) ? "internal" : "unknown"));
+}
+
 static void pushHistory(float inBps, float outBps) {
   g_histIn[g_histHead]  = inBps;
   g_histOut[g_histHead] = outBps;
@@ -28,6 +71,12 @@ static void pushHistory(float inBps, float outBps) {
 }
 
 bool uiInit() {
+  Serial.printf("[UI] canvas need: %ux%u RGB565 = %u bytes\n",
+                static_cast<unsigned>(SCREEN_W),
+                static_cast<unsigned>(SCREEN_H),
+                static_cast<unsigned>(CANVAS_BUFFER_BYTES));
+  logMemoryState("before init");
+
   pinMode(DISP_PWR_PIN, OUTPUT);
   digitalWrite(DISP_PWR_PIN, HIGH);
 
@@ -39,9 +88,15 @@ bool uiInit() {
 
   g_canvas = new Arduino_Canvas(SCREEN_W, SCREEN_H, g_disp);
   if (!g_canvas->begin()) {
-    Serial.println("[UI] canvas->begin() failed!");
+    Serial.printf("[UI] canvas->begin() failed: need %u bytes, psram found=%s\n",
+                  static_cast<unsigned>(CANVAS_BUFFER_BYTES),
+                  psramFound() ? "yes" : "no");
+    logCanvasFramebuffer("after failed begin");
+    logMemoryState("after failed begin");
     return false;
   }
+  logCanvasFramebuffer("after begin");
+  logMemoryState("after begin");
 
   g_canvas->fillScreen(CLR_BG);
   g_canvas->flush();

@@ -16,6 +16,9 @@ constexpr int8_t  DISP_PWR_PIN = 38;
 // ---- Размеры экрана (ландшафт, rotation=1) ----
 constexpr uint16_t SCREEN_W = 536;
 constexpr uint16_t SCREEN_H = 240;
+constexpr uint8_t  RGB565_BYTES_PER_PIXEL = 2;
+constexpr size_t   CANVAS_BUFFER_BYTES =
+    static_cast<size_t>(SCREEN_W) * SCREEN_H * RGB565_BYTES_PER_PIXEL;
 
 // ---- Кнопка ----
 constexpr int8_t  PIN_KEY            = 0;
