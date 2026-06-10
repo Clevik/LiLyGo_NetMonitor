@@ -321,53 +321,35 @@ void uiShowMain(const Telemetry &t) {
     g_canvas->fillRect(0, ZONE_C_Y, SCREEN_W, ZONE_C_H, CLR_BG);
 
     if (g_histCount >= 2) {
-      float maxVal = 1.0f;
+      float maxIn = 1.0f, maxOut = 1.0f;
       uint16_t start = (g_histHead + GRAPH_POINTS - g_histCount) % GRAPH_POINTS;
       for (uint16_t i = 0; i < g_histCount; i++) {
         uint16_t idx = (start + i) % GRAPH_POINTS;
-        if (g_histIn[idx] > maxVal)  maxVal = g_histIn[idx];
-        if (g_histOut[idx] > maxVal) maxVal = g_histOut[idx];
+        if (g_histIn[idx] > maxIn)   maxIn = g_histIn[idx];
+        if (g_histOut[idx] > maxOut) maxOut = g_histOut[idx];
       }
 
-      float xStep = (float)GW / (float)(GRAPH_POINTS - 1);
+      constexpr int16_t HALF_W = GW / 2;
+      float xStep = (float)HALF_W / (float)(GRAPH_POINTS - 1);
       int16_t bottom = GY + GH - 1;
 
-      constexpr uint16_t FILL_IN  = 0x2792;
-      constexpr uint16_t FILL_OUT = 0x6100;
-
-      auto drawFill = [&](const float *data, uint16_t fillColor) {
+      auto drawHalf = [&](const float *data, float maxVal, int16_t offsetX, uint16_t lineColor) {
         int16_t prevPx = -1, prevPy = -1;
         for (uint16_t i = 0; i < g_histCount; i++) {
           uint16_t idx = (start + i) % GRAPH_POINTS;
-          int16_t px = GX + (int16_t)(i * xStep);
-          int16_t py = bottom - (int16_t)((data[idx] / maxVal) * (GH - 1));
-          if (prevPx >= 0) {
-            g_canvas->fillTriangle(prevPx, prevPy, px, py, prevPx, bottom, fillColor);
-            g_canvas->fillTriangle(px, py, prevPx, bottom, px, bottom, fillColor);
-          }
-          prevPx = px;
-          prevPy = py;
-        }
-      };
-
-      auto drawLine = [&](const float *data, uint16_t lineColor) {
-        int16_t prevPx = -1, prevPy = -1;
-        for (uint16_t i = 0; i < g_histCount; i++) {
-          uint16_t idx = (start + i) % GRAPH_POINTS;
-          int16_t px = GX + (int16_t)(i * xStep);
+          int16_t px = offsetX + (int16_t)(i * xStep);
           int16_t py = bottom - (int16_t)((data[idx] / maxVal) * (GH - 1));
           if (prevPx >= 0) {
             g_canvas->drawLine(prevPx, prevPy, px, py, lineColor);
+            g_canvas->drawLine(prevPx, prevPy + 1, px, py + 1, lineColor);
           }
           prevPx = px;
           prevPy = py;
         }
       };
 
-      drawFill(g_histOut, FILL_OUT);
-      drawFill(g_histIn, FILL_IN);
-      drawLine(g_histIn, CLR_TRAFF_IN);
-      drawLine(g_histOut, CLR_TRAFF_OUT);
+      drawHalf(g_histIn, maxIn, GX, CLR_TRAFF_IN);
+      drawHalf(g_histOut, maxOut, GX + HALF_W, CLR_TRAFF_OUT);
     }
 
     g_canvas->setTextSize(2);
