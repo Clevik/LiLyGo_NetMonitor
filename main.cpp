@@ -53,7 +53,8 @@ static void enterState(AppState next) {
       Serial.println("[FSM] -> RUNNING");
       g_lastUiMs = 0;
       otaBegin(g_settings);
-      telemetryStart(g_settings.pingHost.c_str(), g_settings.pingIntervalSec);
+      uiSetRouterIp(g_settings.routerHost.c_str());
+      telemetryStart(g_settings);
       uiShowMain(g_telemetry);
       break;
 
@@ -139,7 +140,8 @@ void loop() {
         Serial.println("[OTA] settings saved, restarting telemetry...");
         SettingsStore::save(g_settings);
         telemetryStop();
-        telemetryStart(g_settings.pingHost.c_str(), g_settings.pingIntervalSec);
+        telemetryStart(g_settings);
+        uiSetRouterIp(g_settings.routerHost.c_str());
         g_lastUiMs = 0;
       }
       if (WiFi.status() != WL_CONNECTED) {

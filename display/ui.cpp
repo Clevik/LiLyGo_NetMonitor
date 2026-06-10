@@ -11,6 +11,7 @@ static Arduino_Canvas  *g_canvas = nullptr;
 
 static char g_fmtBuf[32];
 static char g_connectSsid[64];
+static char g_routerIp[20] = "192.168.1.1";
 
 bool uiInit() {
   pinMode(DISP_PWR_PIN, OUTPUT);
@@ -51,6 +52,28 @@ void uiShowSplash() {
   flush();
 }
 
+static void formatSpeed(double bps, char *val, size_t vLen, const char **unit) {
+  if (bps < 1000.0) {
+    snprintf(val, vLen, "%.0f", bps);
+    *unit = "bit/s";
+    return;
+  }
+  double kbps = bps / 1000.0;
+  if (kbps < 1.0) {
+    snprintf(val, vLen, "%.0f", bps);
+    *unit = "bit/s";
+    return;
+  }
+  double mbps = kbps / 1000.0;
+  if (mbps < 1.0) {
+    snprintf(val, vLen, "%.1f", kbps);
+    *unit = "Kbps";
+  } else {
+    snprintf(val, vLen, "%.1f", mbps);
+    *unit = "Mbps";
+  }
+}
+
 void uiShowApConfig(const char *apName, const char *apIp) {
   g_canvas->fillScreen(CLR_BG);
 
@@ -81,6 +104,11 @@ void uiShowConnecting(const char *ssid) {
   strncpy(g_connectSsid, ssid ? ssid : "", sizeof(g_connectSsid) - 1);
   g_connectSsid[sizeof(g_connectSsid) - 1] = '\0';
   uiUpdateConnecting();
+}
+
+void uiSetRouterIp(const char *ip) {
+  strncpy(g_routerIp, ip ? ip : "", sizeof(g_routerIp) - 1);
+  g_routerIp[sizeof(g_routerIp) - 1] = '\0';
 }
 
 void uiUpdateConnecting() {
@@ -125,7 +153,7 @@ void uiShowMain(const Telemetry &t) {
   g_canvas->setTextSize(3);
   g_canvas->setTextColor(CLR_TEXT);
   g_canvas->setCursor(8, ZONE_A_Y + 26);
-  g_canvas->print("192.168.1.1");
+  g_canvas->print(g_routerIp);
 
   if (t.dataValid) {
     g_canvas->setTextSize(4);
@@ -181,23 +209,43 @@ void uiShowMain(const Telemetry &t) {
   g_canvas->setTextColor(CLR_TRAFF_IN);
   g_canvas->setCursor(12, ZONE_B_Y + 10);
   g_canvas->print("\x19 ");
-  snprintf(g_fmtBuf, sizeof(g_fmtBuf), "%.1f", t.inMbps);
-  g_canvas->print(g_fmtBuf);
-
-  g_canvas->setTextSize(2);
-  g_canvas->setCursor(260, ZONE_B_Y + 18);
-  g_canvas->print("Mbps");
+  {
+    char valBuf[16];
+    const char *unit;
+    if (t.inBps > 0.0) {
+      formatSpeed(t.inBps, valBuf, sizeof(valBuf), &unit);
+      g_canvas->print(valBuf);
+      g_canvas->setTextSize(2);
+      g_canvas->setCursor(260, ZONE_B_Y + 18);
+      g_canvas->print(unit);
+    } else {
+      g_canvas->print("-");
+      g_canvas->setTextSize(2);
+      g_canvas->setCursor(260, ZONE_B_Y + 18);
+      g_canvas->print("bit/s");
+    }
+  }
 
   g_canvas->setTextSize(4);
   g_canvas->setTextColor(CLR_TRAFF_OUT);
   g_canvas->setCursor(12, ZONE_B_Y + 50);
   g_canvas->print("\x18 ");
-  snprintf(g_fmtBuf, sizeof(g_fmtBuf), "%.1f", t.outMbps);
-  g_canvas->print(g_fmtBuf);
-
-  g_canvas->setTextSize(2);
-  g_canvas->setCursor(260, ZONE_B_Y + 58);
-  g_canvas->print("Mbps");
+  {
+    char valBuf[16];
+    const char *unit;
+    if (t.outBps > 0.0) {
+      formatSpeed(t.outBps, valBuf, sizeof(valBuf), &unit);
+      g_canvas->print(valBuf);
+      g_canvas->setTextSize(2);
+      g_canvas->setCursor(260, ZONE_B_Y + 58);
+      g_canvas->print(unit);
+    } else {
+      g_canvas->print("-");
+      g_canvas->setTextSize(2);
+      g_canvas->setCursor(260, ZONE_B_Y + 58);
+      g_canvas->print("bit/s");
+    }
+  }
 
   g_canvas->drawFastHLine(0, ZONE_B_Y + ZONE_B_H - 1, SCREEN_W, CLR_DIM);
 
