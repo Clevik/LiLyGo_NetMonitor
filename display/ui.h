@@ -4,6 +4,7 @@
 
 struct Telemetry {
   bool     linkUp        = false;
+  bool     linkUncertain = false;
   uint32_t pingMs        = 0;
   bool     pingValid     = false;
   bool     pingLoss      = false;

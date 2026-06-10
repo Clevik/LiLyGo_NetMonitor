@@ -35,8 +35,9 @@ constexpr uint16_t ZONE_C_H = 88;
 // ---- Цвета (RGB565) ----
 constexpr uint16_t CLR_BG        = 0x0000;
 constexpr uint16_t CLR_TEXT      = 0xFFFF;
-constexpr uint16_t CLR_STATUS_UP  = 0x07E0;
-constexpr uint16_t CLR_STATUS_DN = 0xF800;
+constexpr uint16_t CLR_STATUS_UP   = 0x07E0;
+constexpr uint16_t CLR_STATUS_DN  = 0xF800;
+constexpr uint16_t CLR_STATUS_UNC = 0xFFE0;
 constexpr uint16_t CLR_PING      = 0x07FF;
 constexpr uint16_t CLR_TRAFF_IN  = 0xAFE5;
 constexpr uint16_t CLR_TRAFF_OUT = 0xFD20;

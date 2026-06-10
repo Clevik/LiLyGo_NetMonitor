@@ -67,10 +67,10 @@ static void formatSpeed(double bps, char *val, size_t vLen, const char **unit) {
   double mbps = kbps / 1000.0;
   if (mbps < 1.0) {
     snprintf(val, vLen, "%.1f", kbps);
-    *unit = "Kbps";
+    *unit = "Kbit/s";
   } else {
     snprintf(val, vLen, "%.1f", mbps);
-    *unit = "Mbps";
+    *unit = "Mbit/s";
   }
 }
 
@@ -157,11 +157,16 @@ void uiShowMain(const Telemetry &t) {
 
   if (t.dataValid) {
     g_canvas->setTextSize(4);
-    g_canvas->setTextColor(t.linkUp ? CLR_STATUS_UP : CLR_STATUS_DN);
-    if (t.linkUp) {
+    if (t.linkUncertain) {
+      g_canvas->setTextColor(CLR_STATUS_UNC);
+      g_canvas->setCursor(220, ZONE_A_Y + 21);
+      g_canvas->print("UP(?)");
+    } else if (t.linkUp) {
+      g_canvas->setTextColor(CLR_STATUS_UP);
       g_canvas->setCursor(260, ZONE_A_Y + 21);
       g_canvas->print(" UP ");
     } else {
+      g_canvas->setTextColor(CLR_STATUS_DN);
       g_canvas->setCursor(240, ZONE_A_Y + 21);
       g_canvas->print("DOWN");
     }
@@ -215,13 +220,14 @@ void uiShowMain(const Telemetry &t) {
     if (t.inBps > 0.0) {
       formatSpeed(t.inBps, valBuf, sizeof(valBuf), &unit);
       g_canvas->print(valBuf);
-      g_canvas->setTextSize(2);
-      g_canvas->setCursor(260, ZONE_B_Y + 18);
+      int cx = g_canvas->getCursorX();
+      g_canvas->setTextSize(3);
+      g_canvas->setCursor(cx + 24, ZONE_B_Y + 18);
       g_canvas->print(unit);
     } else {
       g_canvas->print("-");
-      g_canvas->setTextSize(2);
-      g_canvas->setCursor(260, ZONE_B_Y + 18);
+      g_canvas->setTextSize(3);
+      g_canvas->setCursor(12 + 24 * 3 + 24, ZONE_B_Y + 18);
       g_canvas->print("bit/s");
     }
   }
@@ -236,13 +242,14 @@ void uiShowMain(const Telemetry &t) {
     if (t.outBps > 0.0) {
       formatSpeed(t.outBps, valBuf, sizeof(valBuf), &unit);
       g_canvas->print(valBuf);
-      g_canvas->setTextSize(2);
-      g_canvas->setCursor(260, ZONE_B_Y + 58);
+      int cx = g_canvas->getCursorX();
+      g_canvas->setTextSize(3);
+      g_canvas->setCursor(cx + 24, ZONE_B_Y + 58);
       g_canvas->print(unit);
     } else {
       g_canvas->print("-");
-      g_canvas->setTextSize(2);
-      g_canvas->setCursor(260, ZONE_B_Y + 58);
+      g_canvas->setTextSize(3);
+      g_canvas->setCursor(12 + 24 * 3 + 24, ZONE_B_Y + 58);
       g_canvas->print("bit/s");
     }
   }

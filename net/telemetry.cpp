@@ -27,6 +27,8 @@ static uint32_t g_s2OutOctets = 0;
 static uint32_t g_s2Ms        = 0;
 static bool     g_haveSample2 = false;
 
+static uint8_t  g_snmpFailCount = 0;
+
 static IPAddress g_routerIP;
 static uint16_t  g_snmpPort      = 161;
 static char      g_snmpCommunity[32] = "public";
@@ -51,11 +53,18 @@ static void netTask(void *arg) {
       vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
-    Telemetry t;
+    Telemetry t = g_tel;
+    t.dataValid    = true;
+    t.lastUpdateMs = millis();
+    t.pingMs       = 0;
+    t.pingValid    = false;
+    t.pingLoss     = false;
+    t.linkUncertain = false;
 
     if (g_snmpReady) {
       SnmpData snmp;
       if (snmpPoll(snmp)) {
+        g_snmpFailCount = 0;
         t.linkUp = snmp.linkUp;
 
         uint32_t now = millis();
@@ -88,9 +97,7 @@ static void netTask(void *arg) {
           g_s1Ms        = g_s2Ms;
         }
       } else {
-        t.linkUp = g_tel.linkUp;
-        t.inBps  = g_tel.inBps;
-        t.outBps = g_tel.outBps;
+        g_snmpFailCount++;
       }
     }
 
@@ -102,8 +109,14 @@ static void netTask(void *arg) {
       t.pingLoss = true;
     }
 
-    t.dataValid    = true;
-    t.lastUpdateMs = millis();
+    if (g_snmpFailCount == 0) {
+      // статус от SNMP — уже записан
+    } else if (g_snmpFailCount == 1) {
+      t.linkUp = g_tel.linkUp;
+    } else {
+      t.linkUp = t.pingValid;
+      t.linkUncertain = true;
+    }
 
     if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
       g_tel = t;
@@ -130,9 +143,10 @@ void telemetryStart(const Settings &settings) {
   g_snmpVersion = (settings.snmpVersion == SnmpVersion::V1) ? 0 : 1;
   g_ifIndex = settings.ifIndex;
 
-  g_snmpReady     = false;
-  g_haveSample1   = false;
-  g_haveSample2   = false;
+  g_snmpReady      = false;
+  g_haveSample1    = false;
+  g_haveSample2    = false;
+  g_snmpFailCount  = 0;
   g_s1InOctets    = 0;
   g_s1OutOctets   = 0;
   g_s1Ms          = 0;
