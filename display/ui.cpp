@@ -197,7 +197,11 @@ void uiShowMain(const Telemetry &t) {
       g_canvas->setCursor(275, ZONE_A_Y + 19);
       g_canvas->print(" UP ");
     } else {
-      g_canvas->setTextColor(CLR_STATUS_DN);
+      if (t.pingValid && !t.pingLoss) {
+        g_canvas->setTextColor(CLR_STATUS_UNC);
+      } else {
+        g_canvas->setTextColor(CLR_STATUS_DN);
+      }
       g_canvas->setCursor(255, ZONE_A_Y + 19);
       g_canvas->print("DOWN");
     }
