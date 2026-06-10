@@ -26,7 +26,7 @@ struct Settings {
   uint16_t    snmpPort       = 161;
   SnmpVersion snmpVersion    = SnmpVersion::V2C;
   String      snmpCommunity  = "public";
-  uint32_t    ifIndex        = 0;  // индекс WAN-интерфейса (IF-MIB)
+  uint32_t    ifIndex        = 0;  // индекс WAN-интерфейса (IF-MIB), должен быть > 0
   String      ifName;              // имя интерфейса (опционально)
 
   // --- Пинг ---

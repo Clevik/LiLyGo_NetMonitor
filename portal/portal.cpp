@@ -62,8 +62,8 @@ small{color:#666;font-size:12px}
 <label>SNMP Community</label>
 <input id='scom' value='public'>
 <label>Interface Index</label>
-<input id='ifidx' type='number' value='0'>
-<small>0 = auto-detect WAN</small>
+<input id='ifidx' type='number' min='1' step='1' placeholder='e.g. 4'>
+<small>Required WAN interface index. 0 is not supported.</small>
 </div>
 
 <div class='card'>
@@ -97,6 +97,8 @@ function scan(){
 }
 function pick(s){document.getElementById('ssid').value=s;}
 function doSave(){
+  var ifidx=+document.getElementById('ifidx').value;
+  if(!ifidx||ifidx<1||Math.floor(ifidx)!==ifidx){alert('Enter Interface Index greater than 0');return;}
   var d={
     ssid:document.getElementById('ssid').value,
     wpass:document.getElementById('wpass').value,
@@ -104,7 +106,7 @@ function doSave(){
     sport:+document.getElementById('sport').value,
     sver:+document.getElementById('sver').value,
     scom:document.getElementById('scom').value,
-    ifidx:+document.getElementById('ifidx').value,
+    ifidx:ifidx,
     ping:document.getElementById('ping').value,
     pintv:+document.getElementById('pintv').value,
     intv:+document.getElementById('intv').value
@@ -153,24 +155,31 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
     return;
   }
 
-  g_cfg->wifiSsid         = doc["ssid"]   | "";
-  g_cfg->wifiPassword     = doc["wpass"]  | "";
-  g_cfg->routerHost       = doc["router"] | "";
-  g_cfg->snmpPort         = doc["sport"]  | 161;
-  g_cfg->snmpVersion      = (doc["sver"] | 2) == 1
-                              ? SnmpVersion::V1 : SnmpVersion::V2C;
-  g_cfg->snmpCommunity    = doc["scom"]   | "public";
-  g_cfg->ifIndex          = doc["ifidx"]  | 0;
-  g_cfg->pingHost         = doc["ping"]   | "8.8.8.8";
-  g_cfg->pingIntervalSec  = doc["pintv"]  | 5;
-  g_cfg->updateIntervalSec = doc["intv"]  | 5;
-  g_cfg->configured       = true;
+  Settings next = *g_cfg;
+  next.wifiSsid          = doc["ssid"]   | "";
+  next.wifiPassword      = doc["wpass"]  | "";
+  next.routerHost        = doc["router"] | "";
+  next.snmpPort          = doc["sport"]  | 161;
+  next.snmpVersion       = (doc["sver"] | 2) == 1
+                             ? SnmpVersion::V1 : SnmpVersion::V2C;
+  next.snmpCommunity     = doc["scom"]   | "public";
+  long ifIndex           = doc["ifidx"]  | 0L;
+  next.pingHost          = doc["ping"]   | "8.8.8.8";
+  next.pingIntervalSec   = doc["pintv"]  | 5;
+  next.updateIntervalSec = doc["intv"]   | 5;
+  next.configured        = true;
 
-  if (g_cfg->wifiSsid.length() == 0) {
+  if (next.wifiSsid.length() == 0) {
     req->send(400, "text/plain", "SSID is empty");
     return;
   }
+  if (ifIndex < 1) {
+    req->send(400, "text/plain", "Interface Index must be greater than 0");
+    return;
+  }
+  next.ifIndex = static_cast<uint32_t>(ifIndex);
 
+  *g_cfg = next;
   g_saved = true;
   req->send(200, "text/plain", "Saved! Reconnecting...");
 }

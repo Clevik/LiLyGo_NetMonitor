@@ -188,6 +188,10 @@ bool telemetryStart(const Settings &settings) {
     Serial.println("[NetTask] start failed: cannot create synchronization primitives");
     return false;
   }
+  if (settings.ifIndex == 0) {
+    Serial.println("[NetTask] start failed: ifIndex must be greater than 0");
+    return false;
+  }
   while (xSemaphoreTake(g_stopDone, 0) == pdTRUE) {}
 
   strncpy(g_pingHost, settings.pingHost.c_str(), sizeof(g_pingHost) - 1);

@@ -25,9 +25,15 @@ bool load(Settings &out) {
   out.pingIntervalSec = prefs.getULong("pintv", 5);
   out.updateIntervalSec = prefs.getULong("intv", 5);
   out.historyPoints  = prefs.getUShort("hpts", 120);
-  out.configured     = true;
 
   prefs.end();
+  if (out.ifIndex == 0) {
+    Serial.println("[Settings] invalid config: ifIndex must be greater than 0");
+    out.configured = false;
+    return false;
+  }
+
+  out.configured     = true;
   return true;
 }
 

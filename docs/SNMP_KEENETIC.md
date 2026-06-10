@@ -63,11 +63,12 @@ On the NETMONITOR setup page:
 2. **SNMP Port** — `161`.
 3. **SNMP Version** — `v2c`.
 4. **SNMP Community** — the community string you set (e.g. `public`).
-5. **Interface Index** — `0` for auto-detect, or the specific WAN interface index.
+5. **Interface Index** — the specific WAN interface index. It must be greater than `0`.
 
 ### Finding the WAN Interface Index
 
-If auto-detect does not work, find the correct interface index:
+NETMONITOR does not auto-detect the WAN interface in this firmware. Find the
+correct interface index before saving the setup form:
 
 ```bash
 snmpwalk -v2c -c public 192.168.1.1 ifDescr
@@ -146,11 +147,12 @@ snmpwalk -v2c -c public 192.168.1.1 1.3.6.1.2.1.2.2.1
 2. **SNMP Port** — `161`.
 3. **SNMP Version** — `v2c`.
 4. **SNMP Community** — строка community, которую вы задали (например, `public`).
-5. **Interface Index** — `0` для автоопределения или конкретный индекс WAN-интерфейса.
+5. **Interface Index** — конкретный индекс WAN-интерфейса. Значение должно быть больше `0`.
 
 ### Как найти индекс WAN-интерфейса
 
-Если автоопределение не работает, найдите нужный индекс интерфейса:
+В этой версии прошивки NETMONITOR не выполняет автоопределение WAN-интерфейса.
+Найдите нужный индекс перед сохранением формы настройки:
 
 ```bash
 snmpwalk -v2c -c public 192.168.1.1 ifDescr

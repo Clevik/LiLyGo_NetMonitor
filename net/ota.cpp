@@ -45,8 +45,8 @@ small{color:#666;font-size:12px}
 <label>SNMP Community</label>
 <input id='scom' value='{{SCOM}}'>
 <label>Interface Index</label>
-<input id='ifidx' type='number' value='{{IFIDX}}'>
-<small>0 = auto-detect WAN</small>
+<input id='ifidx' type='number' min='1' step='1' value='{{IFIDX}}'>
+<small>Required WAN interface index. 0 is not supported.</small>
 </div>
 <div class='card'>
 <label>Ping Host</label>
@@ -60,12 +60,14 @@ small{color:#666;font-size:12px}
 <script>
 document.getElementById('sver').value='{{SVER}}';
 function doSave(){
+  var ifidx=+document.getElementById('ifidx').value;
+  if(!ifidx||ifidx<1||Math.floor(ifidx)!==ifidx){alert('Enter Interface Index greater than 0');return;}
   var d={
     router:document.getElementById('router').value,
     sport:+document.getElementById('sport').value,
     sver:+document.getElementById('sver').value,
     scom:document.getElementById('scom').value,
-    ifidx:+document.getElementById('ifidx').value,
+    ifidx:ifidx,
     ping:document.getElementById('ping').value,
     pintv:+document.getElementById('pintv').value
   };
@@ -147,7 +149,7 @@ static String buildSettingsPage() {
   html.replace("{{SPORT}}", g_cfg ? String(g_cfg->snmpPort) : "161");
   html.replace("{{SVER}}", g_cfg ? (g_cfg->snmpVersion == SnmpVersion::V1 ? "1" : "2") : "2");
   html.replace("{{SCOM}}", g_cfg ? g_cfg->snmpCommunity : "public");
-  html.replace("{{IFIDX}}", g_cfg ? String(g_cfg->ifIndex) : "0");
+  html.replace("{{IFIDX}}", g_cfg && g_cfg->ifIndex > 0 ? String(g_cfg->ifIndex) : "");
   html.replace("{{PING}}", g_cfg ? g_cfg->pingHost : "8.8.8.8");
   html.replace("{{PINTV}}", g_cfg ? String(g_cfg->pingIntervalSec) : "5");
   return html;
@@ -169,15 +171,23 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
     return;
   }
 
-  g_cfg->routerHost     = doc["router"] | g_cfg->routerHost;
-  g_cfg->snmpPort       = doc["sport"]  | g_cfg->snmpPort;
-  g_cfg->snmpVersion    = (doc["sver"] | 2) == 1
-                            ? SnmpVersion::V1 : SnmpVersion::V2C;
-  g_cfg->snmpCommunity  = doc["scom"]   | g_cfg->snmpCommunity;
-  g_cfg->ifIndex        = doc["ifidx"]  | g_cfg->ifIndex;
-  g_cfg->pingHost       = doc["ping"]   | g_cfg->pingHost;
-  g_cfg->pingIntervalSec = doc["pintv"] | g_cfg->pingIntervalSec;
+  Settings next = *g_cfg;
+  next.routerHost      = doc["router"] | next.routerHost;
+  next.snmpPort        = doc["sport"]  | next.snmpPort;
+  next.snmpVersion     = (doc["sver"] | 2) == 1
+                           ? SnmpVersion::V1 : SnmpVersion::V2C;
+  next.snmpCommunity   = doc["scom"]   | next.snmpCommunity;
+  long ifIndex         = doc["ifidx"]  | static_cast<long>(next.ifIndex);
+  next.pingHost        = doc["ping"]   | next.pingHost;
+  next.pingIntervalSec = doc["pintv"]  | next.pingIntervalSec;
 
+  if (ifIndex < 1) {
+    req->send(400, "text/plain", "Interface Index must be greater than 0");
+    return;
+  }
+  next.ifIndex = static_cast<uint32_t>(ifIndex);
+
+  *g_cfg = next;
   g_saved = true;
   req->send(200, "text/plain", "Saved! Applying...");
 }
