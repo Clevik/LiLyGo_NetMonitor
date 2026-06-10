@@ -28,9 +28,9 @@ constexpr uint32_t WIFI_CONNECT_TIMEOUT = 20000;
 constexpr uint16_t ZONE_A_Y = 0;
 constexpr uint16_t ZONE_A_H = 70;
 constexpr uint16_t ZONE_B_Y = 70;
-constexpr uint16_t ZONE_B_H = 82;
-constexpr uint16_t ZONE_C_Y = 152;
-constexpr uint16_t ZONE_C_H = 88;
+constexpr uint16_t ZONE_B_H = 64;
+constexpr uint16_t ZONE_C_Y = 134;
+constexpr uint16_t ZONE_C_H = 106;
 
 // ---- Цвета (RGB565) ----
 constexpr uint16_t CLR_BG        = 0x0000;

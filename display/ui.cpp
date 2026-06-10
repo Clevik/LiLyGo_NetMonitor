@@ -164,12 +164,14 @@ void uiShowMain(const Telemetry &t) {
   // Статус UP/DOWN по центру вертикали (textSize 4 = 24x32, center y = 70/2-16=19)
   if (t.dataValid) {
     g_canvas->setTextSize(4);
-    if (t.linkUncertain) {
-      g_canvas->setTextColor(CLR_STATUS_UNC);
-      g_canvas->setCursor(245, ZONE_A_Y + 19);
-      g_canvas->print("UP(?)");
-    } else if (t.linkUp) {
-      g_canvas->setTextColor(CLR_STATUS_UP);
+    if (t.linkUp) {
+      if (t.pingLoss && !t.linkUncertain) {
+        g_canvas->setTextColor(CLR_STATUS_DN);
+      } else if (t.linkUncertain) {
+        g_canvas->setTextColor(CLR_STATUS_UNC);
+      } else {
+        g_canvas->setTextColor(CLR_STATUS_UP);
+      }
       g_canvas->setCursor(275, ZONE_A_Y + 19);
       g_canvas->print(" UP ");
     } else {
@@ -195,7 +197,7 @@ void uiShowMain(const Telemetry &t) {
       pingStr  = frames[(millis() / 500) % 3];
       pingColor = CLR_DIM;
     } else if (t.pingLoss) {
-      pingStr  = "100% loss";
+      pingStr  = "loss";
       pingColor = CLR_STATUS_DN;
     } else if (t.pingMs == 0) {
       pingStr  = "-- ms";
@@ -232,50 +234,55 @@ void uiShowMain(const Telemetry &t) {
     g_canvas->print(rStr);
   }
 
-  g_canvas->drawFastHLine(0, ZONE_A_Y + ZONE_A_H - 1, SCREEN_W, CLR_DIM);
-
-  // --- Зона B: трафик ---
+  // --- Зона B: трафик (одна строка) ---
   g_canvas->fillRect(0, ZONE_B_Y, SCREEN_W, ZONE_B_H, CLR_BG);
 
-  constexpr int16_t UNIT_X = 12 + 24 * 2 + 24 * 4 + 24;
-
-  g_canvas->setTextSize(4);
-  g_canvas->setTextColor(CLR_TRAFF_IN);
-  g_canvas->setCursor(12, ZONE_B_Y + 10);
-  g_canvas->print("\x19 ");
   {
-    char valBuf[16];
-    const char *unit = "bit/s";
-    if (t.inBps > 0.0) {
-      formatSpeed(t.inBps, valBuf, sizeof(valBuf), &unit);
-      g_canvas->print(valBuf);
-    } else {
-      g_canvas->print("-");
-    }
-    g_canvas->setTextSize(3);
-    g_canvas->setCursor(UNIT_X, ZONE_B_Y + 18);
-    g_canvas->print(unit);
-  }
+    const int16_t rowY = ZONE_B_Y + 16;
 
-  g_canvas->setTextSize(4);
-  g_canvas->setTextColor(CLR_TRAFF_OUT);
-  g_canvas->setCursor(12, ZONE_B_Y + 50);
-  g_canvas->print("\x18 ");
-  {
-    char valBuf[16];
-    const char *unit = "bit/s";
-    if (t.outBps > 0.0) {
-      formatSpeed(t.outBps, valBuf, sizeof(valBuf), &unit);
-      g_canvas->print(valBuf);
-    } else {
-      g_canvas->print("-");
+    // Входящий (слева)
+    g_canvas->setTextSize(4);
+    g_canvas->setTextColor(CLR_TRAFF_IN);
+    g_canvas->setCursor(12, rowY);
+    g_canvas->print("\x19 ");
+    {
+      char valBuf[16];
+      const char *unit = "bit/s";
+      if (t.inBps > 0.0) {
+        formatSpeed(t.inBps, valBuf, sizeof(valBuf), &unit);
+        g_canvas->print(valBuf);
+      } else {
+        g_canvas->print("-");
+      }
+      int16_t ux = g_canvas->getCursorX();
+      g_canvas->setTextSize(3);
+      g_canvas->setCursor(ux, rowY + 8);
+      g_canvas->print(" ");
+      g_canvas->print(unit);
     }
-    g_canvas->setTextSize(3);
-    g_canvas->setCursor(UNIT_X, ZONE_B_Y + 58);
-    g_canvas->print(unit);
-  }
 
-  g_canvas->drawFastHLine(0, ZONE_B_Y + ZONE_B_H - 1, SCREEN_W, CLR_DIM);
+    // Исходящий (левый край = центр экрана)
+    constexpr int16_t OUT_X = SCREEN_W / 2;
+    g_canvas->setTextSize(4);
+    g_canvas->setTextColor(CLR_TRAFF_OUT);
+    g_canvas->setCursor(OUT_X, rowY);
+    g_canvas->print("\x18 ");
+    {
+      char valBuf[16];
+      const char *unit = "bit/s";
+      if (t.outBps > 0.0) {
+        formatSpeed(t.outBps, valBuf, sizeof(valBuf), &unit);
+        g_canvas->print(valBuf);
+      } else {
+        g_canvas->print("-");
+      }
+      int16_t ux = g_canvas->getCursorX();
+      g_canvas->setTextSize(3);
+      g_canvas->setCursor(ux, rowY + 8);
+      g_canvas->print(" ");
+      g_canvas->print(unit);
+    }
+  }
 
   // --- Зона C: заглушка графика + OTA IP ---
   g_canvas->fillRect(0, ZONE_C_Y, SCREEN_W, ZONE_C_H, CLR_BG);
