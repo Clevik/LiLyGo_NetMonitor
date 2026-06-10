@@ -26,9 +26,9 @@ constexpr uint32_t WIFI_CONNECT_TIMEOUT = 20000;
 
 // ---- Зоны экрана (y, высота) ----
 constexpr uint16_t ZONE_A_Y = 0;
-constexpr uint16_t ZONE_A_H = 60;
-constexpr uint16_t ZONE_B_Y = 60;
-constexpr uint16_t ZONE_B_H = 92;
+constexpr uint16_t ZONE_A_H = 70;
+constexpr uint16_t ZONE_B_Y = 70;
+constexpr uint16_t ZONE_B_H = 82;
 constexpr uint16_t ZONE_C_Y = 152;
 constexpr uint16_t ZONE_C_H = 88;
 

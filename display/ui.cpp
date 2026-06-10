@@ -66,7 +66,7 @@ static void formatSpeed(double bps, char *val, size_t vLen, const char **unit) {
   }
   double mbps = kbps / 1000.0;
   if (mbps < 1.0) {
-    snprintf(val, vLen, "%.1f", kbps);
+    snprintf(val, vLen, "%.0f", kbps);
     *unit = "Kbit/s";
   } else {
     snprintf(val, vLen, "%.1f", mbps);
@@ -142,67 +142,94 @@ void uiUpdateConnecting() {
 void uiShowMain(const Telemetry &t) {
   g_canvas->fillScreen(CLR_BG);
 
-  // --- Зона A: шапка ---
+  // --- Зона A: шапка (70px) ---
+  // Левая колонка: ROUTER + IP
+  // Центр: статус UP/DOWN
+  // Правая колонка: пинг до хоста + пинг до роутера
+
   g_canvas->fillRect(0, ZONE_A_Y, SCREEN_W, ZONE_A_H, CLR_BG);
 
-  g_canvas->setTextSize(2);
+  // ROUTER (textSize 3 = 18x24)
+  g_canvas->setTextSize(3);
   g_canvas->setTextColor(CLR_DIM);
   g_canvas->setCursor(8, ZONE_A_Y + 4);
   g_canvas->print("ROUTER");
 
+  // IP роутера внизу зоны (textSize 3, y + 70 - 24 - 4 = 42)
   g_canvas->setTextSize(3);
   g_canvas->setTextColor(CLR_TEXT);
-  g_canvas->setCursor(8, ZONE_A_Y + 26);
+  g_canvas->setCursor(8, ZONE_A_Y + 44);
   g_canvas->print(g_routerIp);
 
+  // Статус UP/DOWN по центру вертикали (textSize 4 = 24x32, center y = 70/2-16=19)
   if (t.dataValid) {
     g_canvas->setTextSize(4);
     if (t.linkUncertain) {
       g_canvas->setTextColor(CLR_STATUS_UNC);
-      g_canvas->setCursor(220, ZONE_A_Y + 21);
+      g_canvas->setCursor(200, ZONE_A_Y + 19);
       g_canvas->print("UP(?)");
     } else if (t.linkUp) {
       g_canvas->setTextColor(CLR_STATUS_UP);
-      g_canvas->setCursor(260, ZONE_A_Y + 21);
+      g_canvas->setCursor(230, ZONE_A_Y + 19);
       g_canvas->print(" UP ");
     } else {
       g_canvas->setTextColor(CLR_STATUS_DN);
-      g_canvas->setCursor(240, ZONE_A_Y + 21);
+      g_canvas->setCursor(210, ZONE_A_Y + 19);
       g_canvas->print("DOWN");
     }
   } else {
     g_canvas->setTextSize(4);
     g_canvas->setTextColor(CLR_DIM);
-    g_canvas->setCursor(240, ZONE_A_Y + 21);
+    g_canvas->setCursor(210, ZONE_A_Y + 19);
     g_canvas->print("----");
   }
 
-  g_canvas->setTextSize(3);
+  // Правая колонка: пинги (textSize 3 = 18x24)
+  // Верхний: пинг до внешнего хоста
+  {
+    const char *pingStr = nullptr;
+    uint16_t pingColor  = CLR_PING;
 
-  const char *pingStr = nullptr;
-  uint16_t pingColor  = CLR_PING;
+    if (!t.dataValid) {
+      static const char *frames[] = {"_- ms", "-_ ms", "-- ms"};
+      pingStr  = frames[(millis() / 500) % 3];
+      pingColor = CLR_DIM;
+    } else if (t.pingLoss) {
+      pingStr  = "100% loss";
+      pingColor = CLR_STATUS_DN;
+    } else if (t.pingMs == 0) {
+      pingStr  = "-- ms";
+    } else {
+      snprintf(g_fmtBuf, sizeof(g_fmtBuf), "%u ms", t.pingMs);
+      pingStr = g_fmtBuf;
+    }
 
-  if (!t.dataValid) {
-    static const char *frames[] = {"_- ms", "-_ ms", "-- ms"};
-    pingStr  = frames[(millis() / 500) % 3];
-    pingColor = CLR_DIM;
-  } else if (t.pingLoss) {
-    pingStr  = "100% loss";
-    pingColor = CLR_STATUS_DN;
-  } else if (t.pingMs == 0) {
-    pingStr  = "-- ms";
-  } else {
-    snprintf(g_fmtBuf, sizeof(g_fmtBuf), "%u ms", t.pingMs);
-    pingStr = g_fmtBuf;
+    g_canvas->setTextSize(3);
+    g_canvas->setTextColor(pingColor);
+    int len = strlen(pingStr);
+    int16_t px = SCREEN_W - len * 18 - 8;
+    g_canvas->setCursor(px, ZONE_A_Y + 4);
+    g_canvas->print(pingStr);
   }
 
-  g_canvas->setTextColor(pingColor);
+  // Нижний: пинг до роутера
   {
-    int len = 0;
-    for (const char *p = pingStr; *p; ++p) len++;
+    g_canvas->setTextSize(3);
+    g_canvas->setTextColor(CLR_PING);
+    const char *rStr;
+    char rBuf[16];
+    if (!t.dataValid) {
+      rStr = "-- ms";
+    } else if (t.routerPingValid) {
+      snprintf(rBuf, sizeof(rBuf), "%u ms", t.routerPingMs);
+      rStr = rBuf;
+    } else {
+      rStr = "-- ms";
+    }
+    int len = strlen(rStr);
     int16_t px = SCREEN_W - len * 18 - 8;
-    g_canvas->setCursor(px, ZONE_A_Y + 26);
-    g_canvas->print(pingStr);
+    g_canvas->setCursor(px, ZONE_A_Y + 44);
+    g_canvas->print(rStr);
   }
 
   g_canvas->drawFastHLine(0, ZONE_A_Y + ZONE_A_H - 1, SCREEN_W, CLR_DIM);
@@ -210,26 +237,24 @@ void uiShowMain(const Telemetry &t) {
   // --- Зона B: трафик ---
   g_canvas->fillRect(0, ZONE_B_Y, SCREEN_W, ZONE_B_H, CLR_BG);
 
+  constexpr int16_t UNIT_X = 12 + 24 * 2 + 24 * 4 + 24;
+
   g_canvas->setTextSize(4);
   g_canvas->setTextColor(CLR_TRAFF_IN);
   g_canvas->setCursor(12, ZONE_B_Y + 10);
   g_canvas->print("\x19 ");
   {
     char valBuf[16];
-    const char *unit;
+    const char *unit = "bit/s";
     if (t.inBps > 0.0) {
       formatSpeed(t.inBps, valBuf, sizeof(valBuf), &unit);
       g_canvas->print(valBuf);
-      int cx = g_canvas->getCursorX();
-      g_canvas->setTextSize(3);
-      g_canvas->setCursor(cx + 24, ZONE_B_Y + 18);
-      g_canvas->print(unit);
     } else {
       g_canvas->print("-");
-      g_canvas->setTextSize(3);
-      g_canvas->setCursor(12 + 24 * 3 + 24, ZONE_B_Y + 18);
-      g_canvas->print("bit/s");
     }
+    g_canvas->setTextSize(3);
+    g_canvas->setCursor(UNIT_X, ZONE_B_Y + 18);
+    g_canvas->print(unit);
   }
 
   g_canvas->setTextSize(4);
@@ -238,20 +263,16 @@ void uiShowMain(const Telemetry &t) {
   g_canvas->print("\x18 ");
   {
     char valBuf[16];
-    const char *unit;
+    const char *unit = "bit/s";
     if (t.outBps > 0.0) {
       formatSpeed(t.outBps, valBuf, sizeof(valBuf), &unit);
       g_canvas->print(valBuf);
-      int cx = g_canvas->getCursorX();
-      g_canvas->setTextSize(3);
-      g_canvas->setCursor(cx + 24, ZONE_B_Y + 58);
-      g_canvas->print(unit);
     } else {
       g_canvas->print("-");
-      g_canvas->setTextSize(3);
-      g_canvas->setCursor(12 + 24 * 3 + 24, ZONE_B_Y + 58);
-      g_canvas->print("bit/s");
     }
+    g_canvas->setTextSize(3);
+    g_canvas->setCursor(UNIT_X, ZONE_B_Y + 58);
+    g_canvas->print(unit);
   }
 
   g_canvas->drawFastHLine(0, ZONE_B_Y + ZONE_B_H - 1, SCREEN_W, CLR_DIM);

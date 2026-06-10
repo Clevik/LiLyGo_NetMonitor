@@ -101,6 +101,11 @@ static void netTask(void *arg) {
       }
     }
 
+    if (Ping.ping(g_routerIP, 1)) {
+      t.routerPingMs    = (uint32_t)Ping.averageTime();
+      t.routerPingValid = true;
+    }
+
     bool ok = Ping.ping(g_pingHost, 3);
     if (ok) {
       t.pingMs    = (uint32_t)Ping.averageTime();
