@@ -13,6 +13,20 @@ static char g_fmtBuf[32];
 static char g_connectSsid[64];
 static char g_routerIp[20] = "192.168.1.1";
 
+constexpr uint16_t GRAPH_POINTS = 120;
+static float g_histIn[GRAPH_POINTS]  = {};
+static float g_histOut[GRAPH_POINTS] = {};
+static uint16_t g_histCount = 0;
+static uint16_t g_histHead  = 0;
+static uint32_t g_lastHistMs = 0;
+
+static void pushHistory(float inBps, float outBps) {
+  g_histIn[g_histHead]  = inBps;
+  g_histOut[g_histHead] = outBps;
+  g_histHead = (g_histHead + 1) % GRAPH_POINTS;
+  if (g_histCount < GRAPH_POINTS) g_histCount++;
+}
+
 bool uiInit() {
   pinMode(DISP_PWR_PIN, OUTPUT);
   digitalWrite(DISP_PWR_PIN, HIGH);
@@ -55,22 +69,22 @@ void uiShowSplash() {
 static void formatSpeed(double bps, char *val, size_t vLen, const char **unit) {
   if (bps < 1000.0) {
     snprintf(val, vLen, "%.0f", bps);
-    *unit = "bit/s";
+    *unit = "bit";
     return;
   }
   double kbps = bps / 1000.0;
   if (kbps < 1.0) {
     snprintf(val, vLen, "%.0f", bps);
-    *unit = "bit/s";
+    *unit = "bit";
     return;
   }
   double mbps = kbps / 1000.0;
   if (mbps < 1.0) {
     snprintf(val, vLen, "%.0f", kbps);
-    *unit = "Kbit/s";
+    *unit = "Kbit";
   } else {
     snprintf(val, vLen, "%.1f", mbps);
-    *unit = "Mbit/s";
+    *unit = "Mbit";
   }
 }
 
@@ -140,6 +154,14 @@ void uiUpdateConnecting() {
 }
 
 void uiShowMain(const Telemetry &t) {
+  if (t.dataValid) {
+    uint32_t now = millis();
+    if (now - g_lastHistMs >= 1000) {
+      g_lastHistMs = now;
+      pushHistory((float)t.inBps, (float)t.outBps);
+    }
+  }
+
   g_canvas->fillScreen(CLR_BG);
 
   // --- Зона A: шапка (70px) ---
@@ -247,7 +269,7 @@ void uiShowMain(const Telemetry &t) {
     g_canvas->print("\x19 ");
     {
       char valBuf[16];
-      const char *unit = "bit/s";
+      const char *unit = "bit";
       if (t.inBps > 0.0) {
         formatSpeed(t.inBps, valBuf, sizeof(valBuf), &unit);
         g_canvas->print(valBuf);
@@ -269,7 +291,7 @@ void uiShowMain(const Telemetry &t) {
     g_canvas->print("\x18 ");
     {
       char valBuf[16];
-      const char *unit = "bit/s";
+      const char *unit = "bit";
       if (t.outBps > 0.0) {
         formatSpeed(t.outBps, valBuf, sizeof(valBuf), &unit);
         g_canvas->print(valBuf);
@@ -284,17 +306,72 @@ void uiShowMain(const Telemetry &t) {
     }
   }
 
-  // --- Зона C: заглушка графика + OTA IP ---
-  g_canvas->fillRect(0, ZONE_C_Y, SCREEN_W, ZONE_C_H, CLR_BG);
-  g_canvas->setTextSize(2);
-  g_canvas->setTextColor(CLR_DIM);
-  g_canvas->setCursor(200, ZONE_C_Y + 35);
-  g_canvas->print("[graph]");
+  // --- Зона C: график трафика ---
+  {
+    constexpr int16_t OTA_H = 24;
+    constexpr int16_t GX = 0;
+    constexpr int16_t GY = ZONE_C_Y;
+    constexpr int16_t GW = SCREEN_W;
+    constexpr int16_t GH = ZONE_C_H - OTA_H;
 
-  g_canvas->setTextSize(2);
-  g_canvas->setCursor(8, ZONE_C_Y + ZONE_C_H - 18);
-  g_canvas->print("OTA: ");
-  g_canvas->print(WiFi.localIP().toString());
+    g_canvas->fillRect(0, ZONE_C_Y, SCREEN_W, ZONE_C_H, CLR_BG);
+
+    if (g_histCount >= 2) {
+      float maxVal = 1.0f;
+      uint16_t start = (g_histHead + GRAPH_POINTS - g_histCount) % GRAPH_POINTS;
+      for (uint16_t i = 0; i < g_histCount; i++) {
+        uint16_t idx = (start + i) % GRAPH_POINTS;
+        if (g_histIn[idx] > maxVal)  maxVal = g_histIn[idx];
+        if (g_histOut[idx] > maxVal) maxVal = g_histOut[idx];
+      }
+
+      float xStep = (float)GW / (float)(GRAPH_POINTS - 1);
+      int16_t bottom = GY + GH - 1;
+
+      constexpr uint16_t FILL_IN  = 0x2792;
+      constexpr uint16_t FILL_OUT = 0x6100;
+
+      auto drawFill = [&](const float *data, uint16_t fillColor) {
+        int16_t prevPx = -1, prevPy = -1;
+        for (uint16_t i = 0; i < g_histCount; i++) {
+          uint16_t idx = (start + i) % GRAPH_POINTS;
+          int16_t px = GX + (int16_t)(i * xStep);
+          int16_t py = bottom - (int16_t)((data[idx] / maxVal) * (GH - 1));
+          if (prevPx >= 0) {
+            g_canvas->fillTriangle(prevPx, prevPy, px, py, prevPx, bottom, fillColor);
+            g_canvas->fillTriangle(px, py, prevPx, bottom, px, bottom, fillColor);
+          }
+          prevPx = px;
+          prevPy = py;
+        }
+      };
+
+      auto drawLine = [&](const float *data, uint16_t lineColor) {
+        int16_t prevPx = -1, prevPy = -1;
+        for (uint16_t i = 0; i < g_histCount; i++) {
+          uint16_t idx = (start + i) % GRAPH_POINTS;
+          int16_t px = GX + (int16_t)(i * xStep);
+          int16_t py = bottom - (int16_t)((data[idx] / maxVal) * (GH - 1));
+          if (prevPx >= 0) {
+            g_canvas->drawLine(prevPx, prevPy, px, py, lineColor);
+          }
+          prevPx = px;
+          prevPy = py;
+        }
+      };
+
+      drawFill(g_histOut, FILL_OUT);
+      drawFill(g_histIn, FILL_IN);
+      drawLine(g_histIn, CLR_TRAFF_IN);
+      drawLine(g_histOut, CLR_TRAFF_OUT);
+    }
+
+    g_canvas->setTextSize(2);
+    g_canvas->setTextColor(CLR_DIM);
+    g_canvas->setCursor(8, ZONE_C_Y + ZONE_C_H - 18);
+    g_canvas->print("OTA: ");
+    g_canvas->print(WiFi.localIP().toString());
+  }
 
   flush();
 }
