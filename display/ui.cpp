@@ -166,21 +166,21 @@ void uiShowMain(const Telemetry &t) {
     g_canvas->setTextSize(4);
     if (t.linkUncertain) {
       g_canvas->setTextColor(CLR_STATUS_UNC);
-      g_canvas->setCursor(200, ZONE_A_Y + 19);
+      g_canvas->setCursor(245, ZONE_A_Y + 19);
       g_canvas->print("UP(?)");
     } else if (t.linkUp) {
       g_canvas->setTextColor(CLR_STATUS_UP);
-      g_canvas->setCursor(230, ZONE_A_Y + 19);
+      g_canvas->setCursor(275, ZONE_A_Y + 19);
       g_canvas->print(" UP ");
     } else {
       g_canvas->setTextColor(CLR_STATUS_DN);
-      g_canvas->setCursor(210, ZONE_A_Y + 19);
+      g_canvas->setCursor(255, ZONE_A_Y + 19);
       g_canvas->print("DOWN");
     }
   } else {
     g_canvas->setTextSize(4);
     g_canvas->setTextColor(CLR_DIM);
-    g_canvas->setCursor(210, ZONE_A_Y + 19);
+    g_canvas->setCursor(255, ZONE_A_Y + 19);
     g_canvas->print("----");
   }
 
