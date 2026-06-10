@@ -29,7 +29,9 @@ static void enterState(AppState next) {
   }
   if (g_state == AppState::Running && next != AppState::Running) {
     otaEnd();
-    telemetryStop();
+    if (!telemetryStop()) {
+      Serial.println("[FSM] telemetry stop did not finish before state change");
+    }
   }
 
   g_state = next;
@@ -54,7 +56,9 @@ static void enterState(AppState next) {
       g_lastUiMs = 0;
       otaBegin(g_settings);
       uiSetRouterIp(g_settings.routerHost.c_str());
-      telemetryStart(g_settings);
+      if (!telemetryStart(g_settings)) {
+        Serial.println("[FSM] telemetry start skipped");
+      }
       uiShowMain(g_telemetry);
       break;
 
@@ -139,10 +143,15 @@ void loop() {
       if (otaSettingsSaved()) {
         Serial.println("[OTA] settings saved, restarting telemetry...");
         SettingsStore::save(g_settings);
-        telemetryStop();
-        telemetryStart(g_settings);
-        uiSetRouterIp(g_settings.routerHost.c_str());
-        g_lastUiMs = 0;
+        if (telemetryStop()) {
+          if (!telemetryStart(g_settings)) {
+            Serial.println("[OTA] telemetry restart skipped");
+          }
+          uiSetRouterIp(g_settings.routerHost.c_str());
+          g_lastUiMs = 0;
+        } else {
+          Serial.println("[OTA] telemetry restart skipped: old task is still stopping");
+        }
       }
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[WiFi] lost -> reconnect");

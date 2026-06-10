@@ -28,7 +28,10 @@ static char g_oidOut[64];
 
 void snmpInit(IPAddress ip, uint16_t port, const char *community,
               int version, uint32_t ifIndex) {
-  snmpCleanup();
+  if (g_mgr || g_req) {
+    Serial.println("[SNMP] init skipped: already initialized");
+    return;
+  }
 
   g_ip   = ip;
   g_port = port;

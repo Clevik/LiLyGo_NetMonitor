@@ -3,6 +3,6 @@
 #include "../settings.h"
 #include "../display/ui.h"
 
-void telemetryStart(const Settings &settings);
-void telemetryStop();
+bool telemetryStart(const Settings &settings);
+bool telemetryStop(uint32_t timeoutMs = 10000);
 Telemetry telemetrySnapshot();
