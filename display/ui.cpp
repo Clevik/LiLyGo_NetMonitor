@@ -365,13 +365,14 @@ void uiShowMain(const Telemetry &t) {
     }
   }
 
-  // --- Зона C: график трафика ---
+  // --- Зона C: графики трафика ---
   {
-    constexpr int16_t OTA_H = 24;
-    constexpr int16_t GX = 0;
-    constexpr int16_t GY = ZONE_C_Y;
-    constexpr int16_t GW = SCREEN_W;
-    constexpr int16_t GH = ZONE_C_H - OTA_H;
+    constexpr int16_t OTA_H  = 24;
+    constexpr int16_t GX     = 0;
+    constexpr int16_t GY     = ZONE_C_Y;
+    constexpr int16_t GW     = SCREEN_W;
+    constexpr int16_t GH     = ZONE_C_H - OTA_H;
+    constexpr int16_t HALF_W = GW / 2;
 
     g_canvas->fillRect(0, ZONE_C_Y, SCREEN_W, ZONE_C_H, CLR_BG);
 
@@ -380,20 +381,19 @@ void uiShowMain(const Telemetry &t) {
       uint16_t start = (g_histHead + GRAPH_POINTS - g_histCount) % GRAPH_POINTS;
       for (uint16_t i = 0; i < g_histCount; i++) {
         uint16_t idx = (start + i) % GRAPH_POINTS;
-        if (g_histIn[idx] > maxIn)   maxIn = g_histIn[idx];
+        if (g_histIn[idx]  > maxIn)  maxIn  = g_histIn[idx];
         if (g_histOut[idx] > maxOut) maxOut = g_histOut[idx];
       }
 
-      constexpr int16_t HALF_W = GW / 2;
-      float xStep = (float)HALF_W / (float)(GRAPH_POINTS - 1);
+      float xStep = static_cast<float>(HALF_W) / static_cast<float>(GRAPH_POINTS - 1);
       int16_t bottom = GY + GH - 1;
 
       auto drawHalf = [&](const float *data, float maxVal, int16_t offsetX, uint16_t lineColor) {
         int16_t prevPx = -1, prevPy = -1;
         for (uint16_t i = 0; i < g_histCount; i++) {
           uint16_t idx = (start + i) % GRAPH_POINTS;
-          int16_t px = offsetX + (int16_t)(i * xStep);
-          int16_t py = bottom - (int16_t)((data[idx] / maxVal) * (GH - 1));
+          int16_t px = offsetX + static_cast<int16_t>(i * xStep);
+          int16_t py = bottom - static_cast<int16_t>((data[idx] / maxVal) * (GH - 1));
           if (prevPx >= 0) {
             g_canvas->drawLine(prevPx, prevPy, px, py, lineColor);
             g_canvas->drawLine(prevPx, prevPy + 1, px, py + 1, lineColor);
@@ -403,8 +403,51 @@ void uiShowMain(const Telemetry &t) {
         }
       };
 
-      drawHalf(g_histIn, maxIn, GX, CLR_TRAFF_IN);
+      drawHalf(g_histIn,  maxIn,  GX,         CLR_TRAFF_IN);
       drawHalf(g_histOut, maxOut, GX + HALF_W, CLR_TRAFF_OUT);
+
+      constexpr uint16_t CLR_LABEL_BG = 0x39E7;
+      constexpr int16_t PAD   = 4;
+      constexpr int16_t RAD   = 3;
+      constexpr int16_t CH_W  = 12;
+      constexpr int16_t CH_H  = 16;
+
+      auto fmtUnit = [](float bps, char *v, size_t n, const char **u) {
+        if (bps < 1000.0f) {
+          snprintf(v, n, "%.0f", bps);
+          *u = "bt";
+        } else {
+          float kb = bps / 1000.0f;
+          if (kb < 1000.0f) {
+            snprintf(v, n, "%.0f", kb);
+            *u = "Kb";
+          } else {
+            float mb = kb / 1000.0f;
+            snprintf(v, n, (mb < 10.0f) ? "%.1f" : "%.0f", mb);
+            *u = "Mb";
+          }
+        }
+      };
+
+      auto drawPill = [&](float bps, int16_t px, int16_t py) {
+        char v[16];
+        const char *u;
+        fmtUnit(bps, v, sizeof(v), &u);
+        int textLen = strlen(v) + 1 + strlen(u);
+        int16_t w = textLen * CH_W + PAD * 2;
+        int16_t h = CH_H + PAD * 2;
+        g_canvas->fillRoundRect(px, py, w, h, RAD, CLR_LABEL_BG);
+        g_canvas->setTextSize(2);
+        g_canvas->setTextColor(CLR_TEXT, CLR_LABEL_BG);
+        g_canvas->setCursor(px + PAD, py + PAD);
+        g_canvas->print(v);
+        g_canvas->print(" ");
+        g_canvas->print(u);
+      };
+
+      constexpr int16_t PILL_Y = GY + 2;
+      drawPill(maxIn,  GX + 4,          PILL_Y);
+      drawPill(maxOut, GX + HALF_W + 4, PILL_Y);
     }
 
     g_canvas->setTextSize(2);
