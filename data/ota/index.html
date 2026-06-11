@@ -1,0 +1,92 @@
+<!DOCTYPE html><html><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>NETMONITOR Settings</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#eee;padding:16px}
+h1{color:#07ff;text-align:center;margin:12px 0}
+.card{background:#16213e;border-radius:10px;padding:16px;margin:12px 0}
+label{display:block;margin:8px 0 4px;font-size:14px;color:#aaa}
+input,select{width:100%;padding:10px;border:1px solid #333;border-radius:6px;
+  background:#0f3460;color:#fff;font-size:16px}
+input:focus{border-color:#07ff}
+.btn{display:block;width:100%;padding:14px;margin-top:20px;
+  background:#07ff;color:#000;border:none;border-radius:8px;
+  font-size:18px;font-weight:700;cursor:pointer;text-align:center}
+.btn:hover{background:#05d}
+.btn2{margin-top:8px;background:#555;color:#fff;text-decoration:none;
+  display:block;width:100%;padding:14px;border-radius:8px;
+  font-size:18px;font-weight:700;text-align:center;box-sizing:border-box}
+.btn2:hover{background:#777}
+small{color:#666;font-size:12px}
+#status{text-align:center;padding:8px;color:#07ff;display:none}
+</style></head><body>
+<h1>NETMONITOR</h1>
+<div class='card'>
+<label>Router IP</label>
+<input id='router'>
+<label>SNMP Port</label>
+<input id='sport' type='number' value='161'>
+<label>SNMP Version</label>
+<select id='sver'><option value='1'>v1</option><option value='2'>v2c</option></select>
+<label>SNMP Community</label>
+<input id='scom'>
+<label>Interface Index</label>
+<input id='ifidx' type='number' min='1' step='1'>
+<small>Required WAN interface index. 0 is not supported.</small>
+</div>
+<div class='card'>
+<label>Ping Host</label>
+<input id='ping'>
+<label>External Ping Interval (sec)</label>
+<input id='pintv' type='number' min='1' max='3600' step='1' value='5'>
+<small>How often to ping the external host for latency and loss.</small>
+<label>SNMP Poll Interval (sec)</label>
+<input id='intv' type='number' min='1' max='3600' step='1' value='5'>
+<small>How often to poll router SNMP status and traffic counters.</small>
+</div>
+<div id='status'></div>
+<button class='btn' onclick='doSave()'>Save</button>
+<a class='btn2' href='/ota'>Firmware Update (OTA)</a>
+<script>
+fetch('/api/settings').then(r=>r.json()).then(d=>{
+  document.getElementById('router').value=d.router||'';
+  document.getElementById('sport').value=d.sport||161;
+  document.getElementById('sver').value=d.sver||2;
+  document.getElementById('scom').value=d.scom||'';
+  document.getElementById('ifidx').value=d.ifidx||'';
+  document.getElementById('ping').value=d.ping||'';
+  document.getElementById('pintv').value=d.pintv||5;
+  document.getElementById('intv').value=d.intv||5;
+}).catch(()=>{});
+function validInterval(v){return v>=1&&v<=3600&&Math.floor(v)===v;}
+function validPort(v){return v>=1&&v<=65535&&Math.floor(v)===v;}
+function doSave(){
+  var ifidx=+document.getElementById('ifidx').value;
+  var sport=+document.getElementById('sport').value;
+  var pintv=+document.getElementById('pintv').value;
+  var intv=+document.getElementById('intv').value;
+  if(!ifidx||ifidx<1||Math.floor(ifidx)!==ifidx){alert('Enter Interface Index greater than 0');return;}
+  if(!validPort(sport)){alert('SNMP Port must be 1..65535');return;}
+  if(!validInterval(pintv)||!validInterval(intv)){alert('Ping and SNMP intervals must be 1..3600 sec');return;}
+  var d={
+    router:document.getElementById('router').value,
+    sport:sport,
+    sver:+document.getElementById('sver').value,
+    scom:document.getElementById('scom').value,
+    ifidx:ifidx,
+    ping:document.getElementById('ping').value,
+    pintv:pintv,
+    intv:intv
+  };
+  if(!d.router.trim()){alert('Enter Router IP');return;}
+  if(!d.scom.trim()){alert('Enter SNMP Community');return;}
+  if(!d.ping.trim()){alert('Enter Ping Host');return;}
+  var st=document.getElementById('status');
+  st.style.display='block'; st.textContent='Saving...';
+  fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(d)})
+    .then(r=>r.text()).then(t=>{st.textContent=t;})
+    .catch(e=>{st.textContent='Error: '+e;});
+}
+</script></body></html>

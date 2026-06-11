@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <LittleFS.h>
 
 #include "config.h"
 #include "settings.h"
@@ -85,6 +86,10 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println("\n[NETMONITOR] boot");
+
+  if (!LittleFS.begin(true)) {
+    Serial.println("[FS] LittleFS mount failed");
+  }
 
   pinMode(PIN_KEY, INPUT_PULLUP);
 
