@@ -24,13 +24,14 @@ static constexpr uint32_t NET_TASK_TICK_MS = 100;
 
 static bool     g_snmpReady  = false;
 
-static uint32_t g_s1InOctets  = 0;
-static uint32_t g_s1OutOctets = 0;
+static uint64_t g_s1InOctets  = 0;
+static uint64_t g_s1OutOctets = 0;
 static uint32_t g_s1Ms        = 0;
 static bool     g_haveSample1 = false;
+static bool     g_s1IsHC      = false;
 
-static uint32_t g_s2InOctets  = 0;
-static uint32_t g_s2OutOctets = 0;
+static uint64_t g_s2InOctets  = 0;
+static uint64_t g_s2OutOctets = 0;
 static uint32_t g_s2Ms        = 0;
 static bool     g_haveSample2 = false;
 
@@ -118,7 +119,14 @@ static void netTask(void *arg) {
           g_s1InOctets  = snmp.inOctets;
           g_s1OutOctets = snmp.outOctets;
           g_s1Ms        = sampleMs;
+          g_s1IsHC      = snmp.isHC;
           g_haveSample1 = true;
+        } else if (g_s1IsHC != snmp.isHC) {
+          g_s1InOctets  = snmp.inOctets;
+          g_s1OutOctets = snmp.outOctets;
+          g_s1Ms        = sampleMs;
+          g_s1IsHC      = snmp.isHC;
+          g_haveSample2 = false;
         } else {
           g_s2InOctets  = snmp.inOctets;
           g_s2OutOctets = snmp.outOctets;
@@ -129,12 +137,16 @@ static void netTask(void *arg) {
         if (g_haveSample1 && g_haveSample2) {
           float dt = (g_s2Ms - g_s1Ms) / 1000.0f;
           if (dt >= 0.5f) {
-            uint32_t dIn  = g_s2InOctets  - g_s1InOctets;
-            uint32_t dOut = g_s2OutOctets - g_s1OutOctets;
-            double bpsIn  = (double)dIn  / dt * 8.0;
-            double bpsOut = (double)dOut / dt * 8.0;
-            if (bpsIn  < 1000000000.0) t.inBps  = bpsIn;
-            if (bpsOut < 1000000000.0) t.outBps = bpsOut;
+            uint64_t dIn, dOut;
+            if (g_s1IsHC) {
+              dIn  = g_s2InOctets  - g_s1InOctets;
+              dOut = g_s2OutOctets - g_s1OutOctets;
+            } else {
+              dIn  = (uint64_t)((uint32_t)g_s2InOctets  - (uint32_t)g_s1InOctets);
+              dOut = (uint64_t)((uint32_t)g_s2OutOctets - (uint32_t)g_s1OutOctets);
+            }
+            t.inBps  = (double)dIn  / dt * 8.0;
+            t.outBps = (double)dOut / dt * 8.0;
           }
 
           g_s1InOctets  = g_s2InOctets;
@@ -258,6 +270,7 @@ bool telemetryStart(const Settings &settings) {
   g_s1InOctets    = 0;
   g_s1OutOctets   = 0;
   g_s1Ms          = 0;
+  g_s1IsHC        = false;
   g_s2InOctets    = 0;
   g_s2OutOctets   = 0;
   g_s2Ms          = 0;

@@ -5,9 +5,10 @@
 
 struct SnmpData {
   bool     linkUp     = false;
-  uint32_t inOctets   = 0;
-  uint32_t outOctets  = 0;
+  uint64_t inOctets   = 0;
+  uint64_t outOctets  = 0;
   bool     valid      = false;
+  bool     isHC       = false;
 };
 
 void snmpInit(IPAddress ip, uint16_t port, const char *community,

@@ -15,6 +15,8 @@ static Settings          *g_cfg   = nullptr;
 static bool               g_saved = false;
 static char               g_apName[32];
 
+static constexpr size_t MAX_SETTINGS_BODY = 2048;
+
 static const char HTML_PAGE[] PROGMEM = R"rawliteral(
 <!DOCTYPE html><html><head><meta charset='utf-8'>
 <meta name='viewport' content='width=device-width,initial-scale=1'>
@@ -157,12 +159,13 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
     return;
   }
 
-  String body;
-  body.reserve(len + 1);
-  body.concat((const char *)data, len);
+  if (len > MAX_SETTINGS_BODY) {
+    req->send(413, "text/plain", "Request too large");
+    return;
+  }
 
   JsonDocument doc;
-  if (deserializeJson(doc, body)) {
+  if (deserializeJson(doc, data, len)) {
     req->send(400, "text/plain", "Invalid JSON");
     return;
   }
@@ -274,20 +277,17 @@ void portalLoop() {
   if (g_dns) g_dns->processNextRequest();
   if (g_scanState == REQUESTED) {
     int n = WiFi.scanNetworks(false, true, false, 300);
-    String json = "[";
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
     for (int i = 0; i < n; i++) {
-      if (i) json += ",";
-      json += "{\"ssid\":\"";
-      json += WiFi.SSID(i);
-      json += "\",\"rssi\":";
-      json += WiFi.RSSI(i);
-      json += ",\"auth\":";
-      json += WiFi.encryptionType(i);
-      json += "}";
+      JsonObject obj = arr.add<JsonObject>();
+      obj["ssid"] = WiFi.SSID(i);
+      obj["rssi"] = WiFi.RSSI(i);
+      obj["auth"] = WiFi.encryptionType(i);
     }
-    json += "]";
     WiFi.scanDelete();
-    g_scanJson  = json;
+    g_scanJson.reserve(measureJson(doc) + 1);
+    serializeJson(doc, g_scanJson);
     g_scanState = DONE;
     Serial.printf("[Portal] scan done, %d networks\n", n);
   }

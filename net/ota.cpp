@@ -6,6 +6,8 @@
 
 #include "ota.h"
 
+static constexpr size_t MAX_SETTINGS_BODY = 2048;
+
 static AsyncWebServer *g_srv   = nullptr;
 static Settings       *g_cfg   = nullptr;
 static bool            g_saved = false;
@@ -159,7 +161,9 @@ function upload(){
 )rawliteral";
 
 static String buildSettingsPage() {
-  String html = FPSTR(SETTINGS_PAGE);
+  String html;
+  html.reserve(sizeof(SETTINGS_PAGE) + 128);
+  html = FPSTR(SETTINGS_PAGE);
   html.replace("{{ROUTER}}", g_cfg ? g_cfg->routerHost : "");
   html.replace("{{SPORT}}", g_cfg ? String(g_cfg->snmpPort) : "161");
   html.replace("{{SVER}}", g_cfg ? (g_cfg->snmpVersion == SnmpVersion::V1 ? "1" : "2") : "2");
@@ -177,12 +181,13 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
     return;
   }
 
-  String body;
-  body.reserve(len + 1);
-  body.concat((const char *)data, len);
+  if (len > MAX_SETTINGS_BODY) {
+    req->send(413, "text/plain", "Request too large");
+    return;
+  }
 
   JsonDocument doc;
-  if (deserializeJson(doc, body)) {
+  if (deserializeJson(doc, data, len)) {
     req->send(400, "text/plain", "Invalid JSON");
     return;
   }
