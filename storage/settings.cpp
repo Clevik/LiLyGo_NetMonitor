@@ -176,12 +176,25 @@ bool validateSettings(const Settings &settings, String *error) {
 
 namespace SettingsStore {
 
+static constexpr const char *KEY_SCHEMA_VERSION = "schemaVersion";
+
 bool load(Settings &out) {
   Preferences prefs;
   prefs.begin("netmon", true);
 
   if (!prefs.getBool("configured", false)) {
     prefs.end();
+    return false;
+  }
+
+  uint16_t schemaVersion = prefs.getUShort(KEY_SCHEMA_VERSION, 0);
+  if (schemaVersion != CONFIG_SCHEMA_VERSION) {
+    prefs.end();
+    Serial.printf("[Settings] incompatible schema version: stored=%u expected=%u\n",
+                  schemaVersion, CONFIG_SCHEMA_VERSION);
+    clear();
+    out = Settings{};
+    out.configured = false;
     return false;
   }
 
@@ -229,6 +242,7 @@ bool save(const Settings &in) {
   prefs.begin("netmon", false);
 
   prefs.putBool("configured", true);
+  prefs.putUShort(KEY_SCHEMA_VERSION, CONFIG_SCHEMA_VERSION);
   prefs.putString("ssid",  stored.wifiSsid);
   prefs.putString("wpass", stored.wifiPassword);
   prefs.putString("rtr",   stored.routerHost);
