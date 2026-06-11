@@ -34,7 +34,7 @@ struct Settings {
   String wifiPassword;
 
   // --- Роутер / SNMP ---
-  String      routerHost;          // IP или хост роутера
+  String      routerHost;          // IPv4-адрес роутера
   uint16_t    snmpPort       = 161;
   SnmpVersion snmpVersion    = SnmpVersion::V2C;
   String      snmpCommunity  = "public";
@@ -52,6 +52,12 @@ struct Settings {
   // Признак валидной сохранённой конфигурации.
   bool        configured     = false;
 };
+
+// Нормализовать строковые поля перед проверкой/сохранением.
+void normalizeSettings(Settings& settings);
+
+// Проверить конфигурацию. При ошибке возвращает false и заполняет error.
+bool validateSettings(const Settings& settings, String *error = nullptr);
 
 // API хранилища настроек.
 namespace SettingsStore {

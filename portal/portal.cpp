@@ -53,7 +53,7 @@ small{color:#666;font-size:12px}
 </div>
 
 <div class='card'>
-<label>Router IP / Host</label>
+<label>Router IP</label>
 <input id='router' value='192.168.1.1'>
 <label>SNMP Port</label>
 <input id='sport' type='number' value='161'>
@@ -99,17 +99,20 @@ function scan(){
 }
 function pick(s){document.getElementById('ssid').value=s;}
 function validInterval(v){return v>=1&&v<=3600&&Math.floor(v)===v;}
+function validPort(v){return v>=1&&v<=65535&&Math.floor(v)===v;}
 function doSave(){
   var ifidx=+document.getElementById('ifidx').value;
+  var sport=+document.getElementById('sport').value;
   var pintv=+document.getElementById('pintv').value;
   var intv=+document.getElementById('intv').value;
   if(!ifidx||ifidx<1||Math.floor(ifidx)!==ifidx){alert('Enter Interface Index greater than 0');return;}
+  if(!validPort(sport)){alert('SNMP Port must be 1..65535');return;}
   if(!validInterval(pintv)||!validInterval(intv)){alert('Ping and SNMP intervals must be 1..3600 sec');return;}
   var d={
     ssid:document.getElementById('ssid').value,
     wpass:document.getElementById('wpass').value,
     router:document.getElementById('router').value,
-    sport:+document.getElementById('sport').value,
+    sport:sport,
     sver:+document.getElementById('sver').value,
     scom:document.getElementById('scom').value,
     ifidx:ifidx,
@@ -118,6 +121,9 @@ function doSave(){
     intv:intv
   };
   if(!d.ssid){alert('Enter SSID');return;}
+  if(!d.router.trim()){alert('Enter Router IP');return;}
+  if(!d.scom.trim()){alert('Enter SNMP Community');return;}
+  if(!d.ping.trim()){alert('Enter Ping Host');return;}
   var st=document.getElementById('status');
   st.style.display='block'; st.textContent='Saving...';
   fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -165,7 +171,7 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   next.wifiSsid          = doc["ssid"]   | "";
   next.wifiPassword      = doc["wpass"]  | "";
   next.routerHost        = doc["router"] | "";
-  next.snmpPort          = doc["sport"]  | 161;
+  long snmpPort          = doc["sport"]  | 161L;
   next.snmpVersion       = (doc["sver"] | 2) == 1
                              ? SnmpVersion::V1 : SnmpVersion::V2C;
   next.snmpCommunity     = doc["scom"]   | "public";
@@ -173,19 +179,20 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   next.pingHost          = doc["ping"]   | "8.8.8.8";
   long pingIntervalSec   = doc["pintv"]  | 5L;
   long updateIntervalSec = doc["intv"]   | 5L;
-  next.pingIntervalSec   = clampSettingsIntervalSec(pingIntervalSec);
-  next.updateIntervalSec = clampSettingsIntervalSec(updateIntervalSec);
+  next.snmpPort          = (snmpPort >= 1 && snmpPort <= 65535)
+                             ? static_cast<uint16_t>(snmpPort) : 0;
+  next.ifIndex           = ifIndex > 0 ? static_cast<uint32_t>(ifIndex) : 0;
+  next.pingIntervalSec   = static_cast<uint32_t>(pingIntervalSec);
+  next.updateIntervalSec = static_cast<uint32_t>(updateIntervalSec);
   next.configured        = true;
 
-  if (next.wifiSsid.length() == 0) {
-    req->send(400, "text/plain", "SSID is empty");
+  normalizeSettings(next);
+
+  String error;
+  if (!validateSettings(next, &error)) {
+    req->send(400, "text/plain", error);
     return;
   }
-  if (ifIndex < 1) {
-    req->send(400, "text/plain", "Interface Index must be greater than 0");
-    return;
-  }
-  next.ifIndex = static_cast<uint32_t>(ifIndex);
 
   *g_cfg = next;
   g_saved = true;

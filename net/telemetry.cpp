@@ -212,6 +212,12 @@ static void netTask(void *arg) {
 }
 
 bool telemetryStart(const Settings &settings) {
+  String error;
+  if (!validateSettings(settings, &error)) {
+    Serial.printf("[NetTask] start failed: invalid settings: %s\n", error.c_str());
+    return false;
+  }
+
   if (currentTaskHandle()) {
     Serial.println("[NetTask] start skipped: previous task is still running");
     return false;
@@ -225,10 +231,6 @@ bool telemetryStart(const Settings &settings) {
   }
   if (!g_mutex || !g_stopDone) {
     Serial.println("[NetTask] start failed: cannot create synchronization primitives");
-    return false;
-  }
-  if (settings.ifIndex == 0) {
-    Serial.println("[NetTask] start failed: ifIndex must be greater than 0");
     return false;
   }
   while (xSemaphoreTake(g_stopDone, 0) == pdTRUE) {}
