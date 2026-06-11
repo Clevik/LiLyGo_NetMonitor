@@ -181,9 +181,6 @@ void uiSetRouterIp(const char *ip) {
 }
 
 void uiUpdateConnecting() {
-  static const char *frames[] = {
-    "....", "....", "....", "....", "...."
-  };
   static const uint8_t active[] = { 0, 1, 2, 3, 4 };
   uint8_t frame = (millis() / 400) % 5;
 

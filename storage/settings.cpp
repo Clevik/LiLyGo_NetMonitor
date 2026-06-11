@@ -209,7 +209,6 @@ bool load(Settings &out) {
   out.pingHost       = prefs.getString("ping", "8.8.8.8");
   out.pingIntervalSec = prefs.getULong("pintv", 5);
   out.updateIntervalSec = prefs.getULong("intv", 5);
-  out.historyPoints  = prefs.getUShort("hpts", 120);
 
   prefs.end();
 
@@ -254,7 +253,6 @@ bool save(const Settings &in) {
   prefs.putString("ping",  stored.pingHost);
   prefs.putULong("pintv",  stored.pingIntervalSec);
   prefs.putULong("intv",   stored.updateIntervalSec);
-  prefs.putUShort("hpts",  stored.historyPoints);
 
   prefs.end();
   return true;

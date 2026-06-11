@@ -47,7 +47,6 @@ struct Settings {
 
   // --- Обновление / история ---
   uint32_t    updateIntervalSec = 5;   // период опроса SNMP, сек
-  uint16_t    historyPoints     = 120; // точек в графике
 
   // Признак валидной сохранённой конфигурации.
   bool        configured     = false;
