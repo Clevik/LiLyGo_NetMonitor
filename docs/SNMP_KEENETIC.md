@@ -59,7 +59,7 @@ You should see a list of interfaces with their statuses and counters.
 
 On the NETMONITOR setup page:
 
-1. **Router IP / Host** — enter your router's IP address (e.g. `192.168.1.1`).
+1. **Router IP** — enter your router's IPv4 address (e.g. `192.168.1.1`). Hostnames are not supported.
 2. **SNMP Port** — `161`.
 3. **SNMP Version** — `v2c`.
 4. **SNMP Community** — the community string you set (e.g. `public`).
@@ -143,7 +143,7 @@ snmpwalk -v2c -c public 192.168.1.1 1.3.6.1.2.1.2.2.1
 
 На странице настройки NETMONITOR:
 
-1. **Router IP / Host** — IP-адрес роутера (например, `192.168.1.1`).
+1. **Router IP** — IPv4-адрес роутера (например, `192.168.1.1`). Hostname не поддерживается.
 2. **SNMP Port** — `161`.
 3. **SNMP Version** — `v2c`.
 4. **SNMP Community** — строка community, которую вы задали (например, `public`).

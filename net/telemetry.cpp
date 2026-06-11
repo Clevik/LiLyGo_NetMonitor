@@ -240,7 +240,11 @@ bool telemetryStart(const Settings &settings) {
   g_pingIntervalMs = clampSettingsIntervalSec(static_cast<long>(settings.pingIntervalSec)) * 1000UL;
   g_snmpIntervalMs = clampSettingsIntervalSec(static_cast<long>(settings.updateIntervalSec)) * 1000UL;
 
-  g_routerIP.fromString(settings.routerHost);
+  if (!g_routerIP.fromString(settings.routerHost)) {
+    Serial.printf("[NetTask] start failed: routerHost is not a valid IPv4 address: %s\n",
+                  settings.routerHost.c_str());
+    return false;
+  }
   g_snmpPort = settings.snmpPort;
   strncpy(g_snmpCommunity, settings.snmpCommunity.c_str(), sizeof(g_snmpCommunity) - 1);
   g_snmpCommunity[sizeof(g_snmpCommunity) - 1] = '\0';
