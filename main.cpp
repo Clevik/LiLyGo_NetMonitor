@@ -8,6 +8,7 @@
 #include "portal/portal.h"
 #include "net/ota.h"
 #include "net/telemetry.h"
+#include "touch/touch.h"
 
 enum class AppState : uint8_t {
   Boot,
@@ -92,6 +93,7 @@ void setup() {
   }
 
   pinMode(PIN_KEY, INPUT_PULLUP);
+  touchInit();
 
   if (!uiInit()) {
     Serial.println("[UI] display init failed, halting");
@@ -163,6 +165,11 @@ void loop() {
         enterState(AppState::WifiConnect);
         break;
       }
+
+      if (touchButtonPressed()) {
+        uiCycleBrightness();
+      }
+
       if (now - g_lastUiMs >= 500) {
         g_lastUiMs = now;
         g_telemetry = telemetrySnapshot();

@@ -20,9 +20,17 @@ constexpr uint8_t  RGB565_BYTES_PER_PIXEL = 2;
 constexpr size_t   CANVAS_BUFFER_BYTES =
     static_cast<size_t>(SCREEN_W) * SCREEN_H * RGB565_BYTES_PER_PIXEL;
 
-// ---- Кнопка ----
-constexpr int8_t  PIN_KEY            = 0;
+// ---- Кнопки ----
+constexpr int8_t  PIN_KEY             = 0;
 constexpr uint32_t KEY_LONG_PRESS_MS  = 3000;
+
+// ---- Сенсорная кнопка (CST816T via I2C) ----
+constexpr int8_t  TOUCH_SDA           = 3;
+constexpr int8_t  TOUCH_SCL           = 2;
+constexpr int8_t  TOUCH_IRQ           = 21;
+constexpr uint8_t TOUCH_ADDR          = 0x15;
+constexpr int16_t TOUCH_BTN_X         = 600;
+constexpr int16_t TOUCH_BTN_Y         = 120;
 
 // ---- Таймауты ----
 constexpr uint32_t WIFI_CONNECT_TIMEOUT = 20000;

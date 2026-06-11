@@ -24,3 +24,4 @@ void uiUpdateConnecting();
 void uiSetRouterIp(const char *ip);
 void uiShowMain(const Telemetry &t);
 void uiUpdateMain(const Telemetry &t);
+void uiCycleBrightness();
