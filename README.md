@@ -66,6 +66,7 @@ pio device monitor                 # serial monitor only
 | SNMP Version | v2c | SNMP protocol version |
 | SNMP Community | `public` | Community string |
 | SNMP Port | 161 | Router SNMP port |
+| Wi-Fi Retry Delay | 20 sec | Wait between Wi-Fi reconnection attempts |
 
 ---
 
@@ -133,3 +134,4 @@ pio device monitor                 # только монитор порта
 | Версия SNMP | v2c | Версия протокола SNMP |
 | Community SNMP | `public` | Community-строка |
 | Порт SNMP | 161 | Порт SNMP на роутере |
+| Задержка реконнекта Wi-Fi | 20 сек | Пауза между попытками переподключения к Wi-Fi |

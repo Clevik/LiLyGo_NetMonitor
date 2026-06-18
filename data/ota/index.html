@@ -44,6 +44,9 @@ small{color:#666;font-size:12px}
 <label>SNMP Poll Interval (sec)</label>
 <input id='intv' type='number' min='1' max='3600' step='1' value='5'>
 <small>How often to poll router SNMP status and traffic counters.</small>
+<label>Wi-Fi Retry Delay (sec)</label>
+<input id='wretry' type='number' min='1' max='3600' step='1' value='20'>
+<small>Wait time between Wi-Fi reconnection attempts when the network is unavailable.</small>
 </div>
 <div id='status'></div>
 <button class='btn' onclick='doSave()'>Save</button>
@@ -58,6 +61,7 @@ fetch('/api/settings').then(r=>r.json()).then(d=>{
   document.getElementById('ping').value=d.ping||'';
   document.getElementById('pintv').value=d.pintv||5;
   document.getElementById('intv').value=d.intv||5;
+  document.getElementById('wretry').value=d.wretry||20;
 }).catch(()=>{});
 function validInterval(v){return v>=1&&v<=3600&&Math.floor(v)===v;}
 function validPort(v){return v>=1&&v<=65535&&Math.floor(v)===v;}
@@ -66,9 +70,11 @@ function doSave(){
   var sport=+document.getElementById('sport').value;
   var pintv=+document.getElementById('pintv').value;
   var intv=+document.getElementById('intv').value;
+  var wretry=+document.getElementById('wretry').value;
   if(!ifidx||ifidx<1||Math.floor(ifidx)!==ifidx){alert('Enter Interface Index greater than 0');return;}
   if(!validPort(sport)){alert('SNMP Port must be 1..65535');return;}
   if(!validInterval(pintv)||!validInterval(intv)){alert('Ping and SNMP intervals must be 1..3600 sec');return;}
+  if(!validInterval(wretry)){alert('Wi-Fi Retry Delay must be 1..3600 sec');return;}
   var d={
     router:document.getElementById('router').value,
     sport:sport,
@@ -77,7 +83,8 @@ function doSave(){
     ifidx:ifidx,
     ping:document.getElementById('ping').value,
     pintv:pintv,
-    intv:intv
+    intv:intv,
+    wretry:wretry
   };
   if(!d.router.trim()){alert('Enter Router IP');return;}
   if(!d.scom.trim()){alert('Enter SNMP Community');return;}

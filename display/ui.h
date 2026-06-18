@@ -21,6 +21,7 @@ void uiShowSplash();
 void uiShowApConfig(const char *apName, const char *apIp);
 void uiShowConnecting(const char *ssid);
 void uiUpdateConnecting();
+void uiShowReconnectWait(const char *ssid, uint32_t remainSec);
 void uiSetRouterIp(const char *ip);
 void uiShowMain(const Telemetry &t);
 void uiUpdateMain(const Telemetry &t);

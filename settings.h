@@ -10,6 +10,8 @@
 constexpr uint16_t CONFIG_SCHEMA_VERSION = 1;
 constexpr uint32_t SETTINGS_INTERVAL_MIN_SEC = 1;
 constexpr uint32_t SETTINGS_INTERVAL_MAX_SEC = 3600;
+constexpr uint32_t SETTINGS_WIFI_RETRY_MIN_SEC = 1;
+constexpr uint32_t SETTINGS_WIFI_RETRY_MAX_SEC = 3600;
 
 inline uint32_t clampSettingsIntervalSec(long value) {
   if (value < static_cast<long>(SETTINGS_INTERVAL_MIN_SEC)) {
@@ -32,6 +34,7 @@ struct Settings {
   // --- Wi-Fi ---
   String wifiSsid;
   String wifiPassword;
+  uint32_t wifiRetryDelaySec = 20;  // пауза между попытками переподключения, сек
 
   // --- Роутер / SNMP ---
   String      routerHost;          // IPv4-адрес роутера

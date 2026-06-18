@@ -25,6 +25,12 @@ static uint32_t   g_stateEnteredMs = 0;
 static uint32_t   g_lastUiMs       = 0;
 static uint32_t   g_keyDownMs      = 0;
 
+// Ретрай Wi-Fi внутри состояния WifiConnect.
+static bool       g_wifiWaiting    = false;  // идёт ли пауза между попытками
+static uint32_t   g_nextAttemptMs  = 0;      // момент следующей попытки
+static uint32_t   g_lastWaitSec    = 0;      // последний показанный остаток (сек)
+static uint32_t   g_lastWaitUiMs   = 0;      // когда последний раз перерисовывали ожидание
+
 static void enterState(AppState next) {
   if (g_state == AppState::ApConfig && next != AppState::ApConfig) {
     portalEnd();
@@ -48,6 +54,8 @@ static void enterState(AppState next) {
 
     case AppState::WifiConnect:
       Serial.println("[FSM] -> WIFI_CONNECT");
+      g_wifiWaiting = false;
+      g_nextAttemptMs = 0;
       WiFi.mode(WIFI_STA);
       WiFi.begin(g_settings.wifiSsid.c_str(), g_settings.wifiPassword.c_str());
       uiShowConnecting(g_settings.wifiSsid.c_str());
@@ -135,11 +143,42 @@ void loop() {
       if (WiFi.status() == WL_CONNECTED) {
         Serial.print("[WiFi] connected, IP: ");
         Serial.println(WiFi.localIP());
+        g_wifiWaiting = false;
         enterState(AppState::Running);
-      } else if (now - g_stateEnteredMs > WIFI_CONNECT_TIMEOUT) {
-        Serial.println("[WiFi] connect timeout -> AP_CONFIG");
+        break;
+      }
+
+      if (g_wifiWaiting) {
+        // Пауза между попытками: показываем обратный отсчёт и ждём.
+        uint32_t remainMs = (g_nextAttemptMs > now) ? (g_nextAttemptMs - now) : 0;
+        uint32_t remainSec = (remainMs + 500) / 1000;
+        if (now - g_lastWaitUiMs >= 500 || remainSec != g_lastWaitSec) {
+          g_lastWaitUiMs = now;
+          g_lastWaitSec = remainSec;
+          uiShowReconnectWait(g_settings.wifiSsid.c_str(), remainSec);
+        }
+        if (now >= g_nextAttemptMs) {
+          Serial.println("[WiFi] retry attempt");
+          g_wifiWaiting = false;
+          WiFi.disconnect(true, true);
+          WiFi.mode(WIFI_STA);
+          WiFi.begin(g_settings.wifiSsid.c_str(),
+                     g_settings.wifiPassword.c_str());
+          g_stateEnteredMs = now;
+          uiShowConnecting(g_settings.wifiSsid.c_str());
+        }
+        break;
+      }
+
+      // Идёт попытка подключения.
+      if (now - g_stateEnteredMs > WIFI_CONNECT_TIMEOUT) {
+        Serial.printf("[WiFi] connect timeout, retry in %u s\n",
+                      static_cast<unsigned>(g_settings.wifiRetryDelaySec));
         WiFi.disconnect(true, true);
-        enterState(AppState::ApConfig);
+        g_wifiWaiting = true;
+        g_nextAttemptMs = now + g_settings.wifiRetryDelaySec * 1000ULL;
+        g_lastWaitSec = 0xFFFFFFFF;
+        g_lastWaitUiMs = 0;
       } else {
         uiUpdateConnecting();
       }

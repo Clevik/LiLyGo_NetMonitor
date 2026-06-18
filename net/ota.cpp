@@ -27,6 +27,7 @@ static void handleApiSettings(AsyncWebServerRequest *req) {
   doc["ping"]   = g_cfg->pingHost;
   doc["pintv"]  = g_cfg->pingIntervalSec;
   doc["intv"]   = g_cfg->updateIntervalSec;
+  doc["wretry"] = g_cfg->wifiRetryDelaySec;
   String json;
   serializeJson(doc, json);
   req->send(200, "application/json", json);
@@ -59,11 +60,13 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   next.pingHost        = doc["ping"]   | next.pingHost;
   long pingIntervalSec = doc["pintv"]  | static_cast<long>(next.pingIntervalSec);
   long updateIntervalSec = doc["intv"] | static_cast<long>(next.updateIntervalSec);
+  long wifiRetryDelaySec = doc["wretry"] | static_cast<long>(next.wifiRetryDelaySec);
   next.snmpPort        = (snmpPort >= 1 && snmpPort <= 65535)
                            ? static_cast<uint16_t>(snmpPort) : 0;
   next.ifIndex         = ifIndex > 0 ? static_cast<uint32_t>(ifIndex) : 0;
   next.pingIntervalSec = static_cast<uint32_t>(pingIntervalSec);
   next.updateIntervalSec = static_cast<uint32_t>(updateIntervalSec);
+  next.wifiRetryDelaySec = static_cast<uint32_t>(wifiRetryDelaySec);
 
   normalizeSettings(next);
 

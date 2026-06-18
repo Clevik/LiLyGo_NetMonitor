@@ -57,6 +57,9 @@ small{color:#666;font-size:12px}
 <label>SNMP Poll Interval (sec)</label>
 <input id='intv' type='number' min='1' max='3600' step='1' value='5'>
 <small>How often to poll router SNMP status and traffic counters.</small>
+<label>Wi-Fi Retry Delay (sec)</label>
+<input id='wretry' type='number' min='1' max='3600' step='1' value='20'>
+<small>Wait time between Wi-Fi reconnection attempts when the network is unavailable.</small>
 </div>
 
 <div id='status'></div>
@@ -87,9 +90,11 @@ function doSave(){
   var sport=+document.getElementById('sport').value;
   var pintv=+document.getElementById('pintv').value;
   var intv=+document.getElementById('intv').value;
+  var wretry=+document.getElementById('wretry').value;
   if(!ifidx||ifidx<1||Math.floor(ifidx)!==ifidx){alert('Enter Interface Index greater than 0');return;}
   if(!validPort(sport)){alert('SNMP Port must be 1..65535');return;}
   if(!validInterval(pintv)||!validInterval(intv)){alert('Ping and SNMP intervals must be 1..3600 sec');return;}
+  if(!validInterval(wretry)){alert('Wi-Fi Retry Delay must be 1..3600 sec');return;}
   var d={
     ssid:document.getElementById('ssid').value,
     wpass:document.getElementById('wpass').value,
@@ -100,7 +105,8 @@ function doSave(){
     ifidx:ifidx,
     ping:document.getElementById('ping').value,
     pintv:pintv,
-    intv:intv
+    intv:intv,
+    wretry:wretry
   };
   if(!d.ssid){alert('Enter SSID');return;}
   if(!d.router.trim()){alert('Enter Router IP');return;}

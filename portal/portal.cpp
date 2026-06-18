@@ -63,11 +63,13 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   next.pingHost          = doc["ping"]   | "8.8.8.8";
   long pingIntervalSec   = doc["pintv"]  | 5L;
   long updateIntervalSec = doc["intv"]   | 5L;
+  long wifiRetryDelaySec = doc["wretry"] | 20L;
   next.snmpPort          = (snmpPort >= 1 && snmpPort <= 65535)
                              ? static_cast<uint16_t>(snmpPort) : 0;
   next.ifIndex           = ifIndex > 0 ? static_cast<uint32_t>(ifIndex) : 0;
   next.pingIntervalSec   = static_cast<uint32_t>(pingIntervalSec);
   next.updateIntervalSec = static_cast<uint32_t>(updateIntervalSec);
+  next.wifiRetryDelaySec = static_cast<uint32_t>(wifiRetryDelaySec);
   next.configured        = true;
 
   normalizeSettings(next);

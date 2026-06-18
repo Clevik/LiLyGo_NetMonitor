@@ -213,6 +213,34 @@ void uiUpdateConnecting() {
   flush();
 }
 
+void uiShowReconnectWait(const char *ssid, uint32_t remainSec) {
+  g_canvas->fillScreen(CLR_BG);
+
+  g_canvas->setTextSize(3);
+  g_canvas->setTextColor(CLR_STATUS_DN);
+  g_canvas->setCursor(20, 50);
+  g_canvas->print("Wi-Fi lost");
+
+  g_canvas->setTextSize(3);
+  g_canvas->setTextColor(CLR_TEXT);
+  g_canvas->setCursor(20, 95);
+  g_canvas->print("Retry in ");
+  g_canvas->print(remainSec);
+  g_canvas->print("s");
+
+  g_canvas->setTextSize(2);
+  g_canvas->setTextColor(CLR_DIM);
+  g_canvas->setCursor(20, 145);
+  g_canvas->print("SSID: ");
+  g_canvas->print(ssid ? ssid : "");
+
+  g_canvas->setTextSize(2);
+  g_canvas->setTextColor(CLR_DIM);
+  g_canvas->setCursor(20, 185);
+  g_canvas->print("Hold KEY >3s to reset");
+  flush();
+}
+
 void uiShowMain(const Telemetry &t) {
   if (t.dataValid) {
     uint32_t now = millis();

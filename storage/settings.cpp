@@ -171,6 +171,10 @@ bool validateSettings(const Settings &settings, String *error) {
       settings.updateIntervalSec > SETTINGS_INTERVAL_MAX_SEC) {
     return reject(error, "SNMP Poll Interval must be 1..3600 sec");
   }
+  if (settings.wifiRetryDelaySec < SETTINGS_WIFI_RETRY_MIN_SEC ||
+      settings.wifiRetryDelaySec > SETTINGS_WIFI_RETRY_MAX_SEC) {
+    return reject(error, "Wi-Fi Retry Delay must be 1..3600 sec");
+  }
   return true;
 }
 
@@ -200,6 +204,7 @@ bool load(Settings &out) {
 
   out.wifiSsid       = prefs.getString("ssid", "");
   out.wifiPassword   = prefs.getString("wpass", "");
+  out.wifiRetryDelaySec = prefs.getULong("wretry", 20);
   out.routerHost     = prefs.getString("rtr", "");
   out.snmpPort       = prefs.getUShort("sport", 161);
   out.snmpVersion    = static_cast<SnmpVersion>(prefs.getUChar("sver", 1));
@@ -244,6 +249,7 @@ bool save(const Settings &in) {
   prefs.putUShort(KEY_SCHEMA_VERSION, CONFIG_SCHEMA_VERSION);
   prefs.putString("ssid",  stored.wifiSsid);
   prefs.putString("wpass", stored.wifiPassword);
+  prefs.putULong("wretry", stored.wifiRetryDelaySec);
   prefs.putString("rtr",   stored.routerHost);
   prefs.putUShort("sport", stored.snmpPort);
   prefs.putUChar("sver",   static_cast<uint8_t>(stored.snmpVersion));
