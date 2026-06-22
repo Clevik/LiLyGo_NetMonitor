@@ -12,6 +12,8 @@ struct Telemetry {
   bool     routerPingValid = false;
   double   inBps          = 0.0;
   double   outBps         = 0.0;
+  uint32_t interfaceUptimeSec = 0;
+  bool     interfaceUptimeValid = false;
   uint32_t lastUpdateMs   = 0;
   bool     dataValid      = false;
 };

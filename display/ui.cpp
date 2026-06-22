@@ -164,6 +164,34 @@ static void formatSpeed(double bps, char *val, size_t vLen, const char **unit) {
   }
 }
 
+static constexpr uint32_t ROUTER_INFO_SWITCH_MS = 5000;
+
+static bool shouldShowInterfaceUptime(const Telemetry &t) {
+  return t.interfaceUptimeValid &&
+         ((millis() / ROUTER_INFO_SWITCH_MS) % 2U) == 1U;
+}
+
+static void formatInterfaceUptime(uint32_t uptimeSec, char *out, size_t outLen) {
+  uint32_t totalMinutes = uptimeSec / 60U;
+  uint32_t days = totalMinutes / (24U * 60U);
+  uint32_t hours = (totalMinutes / 60U) % 24U;
+  uint32_t minutes = totalMinutes % 60U;
+
+  if (days > 0) {
+    snprintf(out, outLen, "%lu d %lu h %lu m",
+             static_cast<unsigned long>(days),
+             static_cast<unsigned long>(hours),
+             static_cast<unsigned long>(minutes));
+  } else if (hours > 0) {
+    snprintf(out, outLen, "%lu h %lu m",
+             static_cast<unsigned long>(hours),
+             static_cast<unsigned long>(minutes));
+  } else {
+    snprintf(out, outLen, "%lu m",
+             static_cast<unsigned long>(minutes));
+  }
+}
+
 static void updateTrafficHistory(const Telemetry &t) {
   if (!t.dataValid) return;
 
@@ -607,7 +635,14 @@ static void uiShowMainRound(const Telemetry &t) {
   drawWifiIcon(115, centerYFromPdf(275), CLR_ROUND_DOWNLOAD);
   drawGlobeIcon(351, centerYFromPdf(275), CLR_ROUND_UPLOAD);
 
-  drawTextCentered(g_routerIp, 233, centerYFromPdf(425), 4, CLR_TEXT);
+  if (shouldShowInterfaceUptime(t)) {
+    char uptime[32];
+    formatInterfaceUptime(t.interfaceUptimeSec, uptime, sizeof(uptime));
+    drawTextCentered("UPTIME", 233, 29, 2, CLR_DIM);
+    drawTextCentered(uptime, 233, 53, 3, CLR_TEXT);
+  } else {
+    drawTextCentered(g_routerIp, 233, centerYFromPdf(425), 4, CLR_TEXT);
+  }
   drawTextCenteredGlow(statusText(t), 233, centerYFromPdf(360), 9,
                        statusColor(t), statusColor(t));
 
@@ -642,17 +677,25 @@ static void uiShowMainRect(const Telemetry &t) {
 
   g_canvas->fillRect(0, ZONE_A_Y, SCREEN_W, ZONE_A_H, CLR_BG);
 
-  // ROUTER (textSize 3 = 18x24)
+  bool showUptime = shouldShowInterfaceUptime(t);
+
+  // ROUTER / UPTIME (textSize 3 = 18x24)
   g_canvas->setTextSize(3);
   g_canvas->setTextColor(CLR_DIM);
   g_canvas->setCursor(8, ZONE_A_Y + 4);
-  g_canvas->print("ROUTER");
+  g_canvas->print(showUptime ? "UPTIME" : "ROUTER");
 
-  // IP роутера внизу зоны (textSize 3, y + 70 - 24 - 4 = 42)
-  g_canvas->setTextSize(3);
+  // IP роутера или uptime интерфейса внизу зоны.
+  char routerInfo[32];
+  if (showUptime) {
+    formatInterfaceUptime(t.interfaceUptimeSec, routerInfo, sizeof(routerInfo));
+  } else {
+    snprintf(routerInfo, sizeof(routerInfo), "%s", g_routerIp);
+  }
+  g_canvas->setTextSize(showUptime ? 2 : 3);
   g_canvas->setTextColor(CLR_TEXT);
-  g_canvas->setCursor(8, ZONE_A_Y + 44);
-  g_canvas->print(g_routerIp);
+  g_canvas->setCursor(8, showUptime ? ZONE_A_Y + 48 : ZONE_A_Y + 44);
+  g_canvas->print(routerInfo);
 
   // Статус UP/DOWN по центру вертикали (textSize 4 = 24x32, center y = 70/2-16=19)
   if (t.dataValid) {

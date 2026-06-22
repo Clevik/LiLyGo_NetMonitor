@@ -113,6 +113,8 @@ static void netTask(void *arg) {
       if (snmpPoll(snmp)) {
         g_snmpFailCount = 0;
         t.linkUp = snmp.linkUp;
+        t.interfaceUptimeSec = snmp.interfaceStateUptimeSec;
+        t.interfaceUptimeValid = snmp.interfaceStateUptimeValid;
 
         if (snmp.countersValid) {
           uint32_t sampleMs = millis();
@@ -177,6 +179,8 @@ static void netTask(void *arg) {
         }
       } else {
         g_snmpFailCount++;
+        t.interfaceUptimeSec = 0;
+        t.interfaceUptimeValid = false;
       }
       changed = true;
     }
@@ -230,6 +234,10 @@ static void netTask(void *arg) {
     } else {
       t.linkUp = t.pingValid;
       t.linkUncertain = true;
+    }
+    if (!t.linkUp) {
+      t.interfaceUptimeSec = 0;
+      t.interfaceUptimeValid = false;
     }
 
     if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
