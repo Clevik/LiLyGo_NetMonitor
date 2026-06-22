@@ -4,6 +4,8 @@
 #include "config.h"
 #include "touch.h"
 
+#if defined(HW_TOUCH_CST816T)
+
 static volatile bool g_irqFlag  = false;
 static bool         g_waitRelease = false;
 
@@ -69,3 +71,19 @@ bool touchButtonPressed() {
   }
   return false;
 }
+
+#else
+
+// Заглушка: сенсорный контроллер на этой плате не поддерживается.
+// TODO: реализовать драйвер для FT3168 (T-Display S3 AMOLED 1.43/1.75).
+
+bool touchInit() {
+  Serial.println("[Touch] unsupported on this board");
+  return false;
+}
+
+bool touchButtonPressed() {
+  return false;
+}
+
+#endif

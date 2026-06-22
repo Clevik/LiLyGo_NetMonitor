@@ -19,9 +19,9 @@ static constexpr uint8_t BRIGHTNESS_LEVELS[] = {0xFF, 0xBF, 0x80, 0x4D, 0x00};
 static constexpr uint8_t BRIGHTNESS_COUNT = 5;
 static uint8_t g_brightnessIdx = 0;
 
-#define RM67162_BRIGHTNESS 0x51
-#define RM67162_DISPON     0x29
-#define RM67162_DISPOFF    0x28
+#define DISP_CMD_BRIGHTNESS 0x51
+#define DISP_CMD_DISPON     0x29
+#define DISP_CMD_DISPOFF    0x28
 
 constexpr uint16_t GRAPH_POINTS = 120;
 static float g_histIn[GRAPH_POINTS]  = {};
@@ -92,7 +92,14 @@ bool uiInit() {
     DISP_CS, DISP_SCK,
     DISP_D0, DISP_D1, DISP_D2, DISP_D3);
 
-  g_disp = new Arduino_RM67162(g_bus, DISP_RST, 1, false);
+#if defined(HW_DISP_RM67162)
+  g_disp = new Arduino_RM67162(g_bus, DISP_RST, DISP_ROTATION, false);
+#elif defined(HW_DISP_CO5300)
+  g_disp = new Arduino_CO5300(g_bus, DISP_RST, DISP_ROTATION, false,
+                              SCREEN_W, SCREEN_H);
+#else
+  #error "Неизвестный драйвер дисплея. Определите HW_DISP_* в hardware/*.h"
+#endif
 
   g_canvas = new Arduino_Canvas(SCREEN_W, SCREEN_H, g_disp);
   if (!g_canvas->begin()) {
@@ -501,11 +508,11 @@ void uiCycleBrightness() {
   g_brightnessIdx = (g_brightnessIdx + 1) % BRIGHTNESS_COUNT;
   uint8_t val = BRIGHTNESS_LEVELS[g_brightnessIdx];
   g_bus->beginWrite();
-  g_bus->writeC8D8(RM67162_BRIGHTNESS, val);
+  g_bus->writeC8D8(DISP_CMD_BRIGHTNESS, val);
   if (val > 0) {
-    g_bus->writeCommand(RM67162_DISPON);
+    g_bus->writeCommand(DISP_CMD_DISPON);
   } else {
-    g_bus->writeCommand(RM67162_DISPOFF);
+    g_bus->writeCommand(DISP_CMD_DISPOFF);
   }
   g_bus->endWrite();
   Serial.printf("[UI] brightness -> %d (0x%02X)\n", g_brightnessIdx, val);
