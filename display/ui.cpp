@@ -178,16 +178,16 @@ static void formatInterfaceUptime(uint32_t uptimeSec, char *out, size_t outLen) 
   uint32_t minutes = totalMinutes % 60U;
 
   if (days > 0) {
-    snprintf(out, outLen, "%lu d %lu h %lu m",
+    snprintf(out, outLen, "%lud %luh %lum",
              static_cast<unsigned long>(days),
              static_cast<unsigned long>(hours),
              static_cast<unsigned long>(minutes));
   } else if (hours > 0) {
-    snprintf(out, outLen, "%lu h %lu m",
+    snprintf(out, outLen, "%luh %lum",
              static_cast<unsigned long>(hours),
              static_cast<unsigned long>(minutes));
   } else {
-    snprintf(out, outLen, "%lu m",
+    snprintf(out, outLen, "%lum",
              static_cast<unsigned long>(minutes));
   }
 }
@@ -638,8 +638,7 @@ static void uiShowMainRound(const Telemetry &t) {
   if (shouldShowInterfaceUptime(t)) {
     char uptime[32];
     formatInterfaceUptime(t.interfaceUptimeSec, uptime, sizeof(uptime));
-    drawTextCentered("UPTIME", 233, 29, 2, CLR_DIM);
-    drawTextCentered(uptime, 233, 53, 3, CLR_TEXT);
+    drawTextCentered(uptime, 233, centerYFromPdf(425), 4, CLR_TEXT);
   } else {
     drawTextCentered(g_routerIp, 233, centerYFromPdf(425), 4, CLR_TEXT);
   }
@@ -692,9 +691,9 @@ static void uiShowMainRect(const Telemetry &t) {
   } else {
     snprintf(routerInfo, sizeof(routerInfo), "%s", g_routerIp);
   }
-  g_canvas->setTextSize(showUptime ? 2 : 3);
+  g_canvas->setTextSize(3);
   g_canvas->setTextColor(CLR_TEXT);
-  g_canvas->setCursor(8, showUptime ? ZONE_A_Y + 48 : ZONE_A_Y + 44);
+  g_canvas->setCursor(8, ZONE_A_Y + 44);
   g_canvas->print(routerInfo);
 
   // Статус UP/DOWN по центру вертикали (textSize 4 = 24x32, center y = 70/2-16=19)
