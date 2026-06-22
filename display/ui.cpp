@@ -23,6 +23,7 @@ static char g_routerIp[20] = "192.168.1.1";
 static constexpr uint8_t BRIGHTNESS_LEVELS[] = {0xFF, 0xBF, 0x80, 0x4D, 0x00};
 static constexpr uint8_t BRIGHTNESS_COUNT = 5;
 static uint8_t g_brightnessIdx = 0;
+static bool g_redrawRequested = false;
 
 #define DISP_CMD_BRIGHTNESS 0x51
 #define DISP_CMD_DISPON     0x29
@@ -171,6 +172,10 @@ static void updateTrafficHistory(const Telemetry &t) {
     g_lastHistMs = now;
     pushHistory((float)t.inBps, (float)t.outBps);
   }
+}
+
+void uiObserveTelemetry(const Telemetry &t) {
+  updateTrafficHistory(t);
 }
 
 #if defined(HW_AMOLED_143)
@@ -872,7 +877,7 @@ static void uiShowMainRect(const Telemetry &t) {
 }
 
 void uiShowMain(const Telemetry &t) {
-  updateTrafficHistory(t);
+  if (!uiDisplayEnabled()) return;
 #if defined(HW_AMOLED_143)
   uiShowMainRound(t);
 #else
@@ -884,7 +889,18 @@ void uiUpdateMain(const Telemetry &t) {
   uiShowMain(t);
 }
 
+bool uiDisplayEnabled() {
+  return BRIGHTNESS_LEVELS[g_brightnessIdx] > 0;
+}
+
+bool uiConsumeRedrawRequest() {
+  bool requested = g_redrawRequested;
+  g_redrawRequested = false;
+  return requested;
+}
+
 void uiCycleBrightness() {
+  bool wasEnabled = uiDisplayEnabled();
   g_brightnessIdx = (g_brightnessIdx + 1) % BRIGHTNESS_COUNT;
   uint8_t val = BRIGHTNESS_LEVELS[g_brightnessIdx];
   g_bus->beginWrite();
@@ -895,5 +911,8 @@ void uiCycleBrightness() {
     g_bus->writeCommand(DISP_CMD_DISPOFF);
   }
   g_bus->endWrite();
+  if (!wasEnabled && val > 0) {
+    g_redrawRequested = true;
+  }
   Serial.printf("[UI] brightness -> %d (0x%02X)\n", g_brightnessIdx, val);
 }

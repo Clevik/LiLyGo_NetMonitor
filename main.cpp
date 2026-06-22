@@ -23,6 +23,7 @@ static Telemetry  g_telemetry;
 
 static uint32_t   g_stateEnteredMs = 0;
 static uint32_t   g_lastUiMs       = 0;
+static uint32_t   g_lastTelemetryMs = 0;
 static uint32_t   g_keyDownMs      = 0;
 
 #if defined(HW_AMOLED_143)
@@ -30,6 +31,7 @@ static constexpr uint32_t UI_RUNNING_FRAME_MS = 100;
 #else
 static constexpr uint32_t UI_RUNNING_FRAME_MS = 500;
 #endif
+static constexpr uint32_t TELEMETRY_SNAPSHOT_MS = 500;
 
 // Ретрай Wi-Fi внутри состояния WifiConnect.
 static bool       g_wifiWaiting    = false;  // идёт ли пауза между попытками
@@ -70,6 +72,7 @@ static void enterState(AppState next) {
     case AppState::Running:
       Serial.println("[FSM] -> RUNNING");
       g_lastUiMs = 0;
+      g_lastTelemetryMs = 0;
       otaBegin(g_settings);
       uiSetRouterIp(g_settings.routerHost.c_str());
       if (!telemetryStart(g_settings)) {
@@ -201,6 +204,7 @@ void loop() {
           }
           uiSetRouterIp(g_settings.routerHost.c_str());
           g_lastUiMs = 0;
+          g_lastTelemetryMs = 0;
         } else {
           Serial.println("[OTA] telemetry restart skipped: old task is still stopping");
         }
@@ -215,9 +219,17 @@ void loop() {
         uiCycleBrightness();
       }
 
-      if (now - g_lastUiMs >= UI_RUNNING_FRAME_MS) {
-        g_lastUiMs = now;
+      bool redrawRequested = uiConsumeRedrawRequest();
+      if (g_lastTelemetryMs == 0 || now - g_lastTelemetryMs >= TELEMETRY_SNAPSHOT_MS) {
+        g_lastTelemetryMs = now;
         g_telemetry = telemetrySnapshot();
+        uiObserveTelemetry(g_telemetry);
+      }
+
+      uint32_t uiFrameMs = uiDisplayEnabled() ? UI_RUNNING_FRAME_MS : 0;
+      if (uiFrameMs > 0 &&
+          (redrawRequested || g_lastUiMs == 0 || now - g_lastUiMs >= uiFrameMs)) {
+        g_lastUiMs = now;
         uiUpdateMain(g_telemetry);
       }
       break;
