@@ -7,6 +7,7 @@
 
 #include "telemetry.h"
 #include "snmp_client.h"
+#include "config.h"
 
 static SemaphoreHandle_t g_mutex      = nullptr;
 static SemaphoreHandle_t g_stopDone   = nullptr;
@@ -113,45 +114,66 @@ static void netTask(void *arg) {
         g_snmpFailCount = 0;
         t.linkUp = snmp.linkUp;
 
-        uint32_t sampleMs = millis();
+        if (snmp.countersValid) {
+          uint32_t sampleMs = millis();
 
-        if (!g_haveSample1) {
-          g_s1InOctets  = snmp.inOctets;
-          g_s1OutOctets = snmp.outOctets;
-          g_s1Ms        = sampleMs;
-          g_s1IsHC      = snmp.isHC;
-          g_haveSample1 = true;
-        } else if (g_s1IsHC != snmp.isHC) {
-          g_s1InOctets  = snmp.inOctets;
-          g_s1OutOctets = snmp.outOctets;
-          g_s1Ms        = sampleMs;
-          g_s1IsHC      = snmp.isHC;
-          g_haveSample2 = false;
-        } else {
-          g_s2InOctets  = snmp.inOctets;
-          g_s2OutOctets = snmp.outOctets;
-          g_s2Ms        = sampleMs;
-          g_haveSample2 = true;
-        }
-
-        if (g_haveSample1 && g_haveSample2) {
-          float dt = (g_s2Ms - g_s1Ms) / 1000.0f;
-          if (dt >= 0.5f) {
-            uint64_t dIn, dOut;
-            if (g_s1IsHC) {
-              dIn  = g_s2InOctets  - g_s1InOctets;
-              dOut = g_s2OutOctets - g_s1OutOctets;
-            } else {
-              dIn  = (uint64_t)((uint32_t)g_s2InOctets  - (uint32_t)g_s1InOctets);
-              dOut = (uint64_t)((uint32_t)g_s2OutOctets - (uint32_t)g_s1OutOctets);
-            }
-            t.inBps  = (double)dIn  / dt * 8.0;
-            t.outBps = (double)dOut / dt * 8.0;
+          if (!g_haveSample1) {
+            g_s1InOctets  = snmp.inOctets;
+            g_s1OutOctets = snmp.outOctets;
+            g_s1Ms        = sampleMs;
+            g_s1IsHC      = snmp.isHC;
+            g_haveSample1 = true;
+          } else if (g_s1IsHC != snmp.isHC) {
+            g_s1InOctets  = snmp.inOctets;
+            g_s1OutOctets = snmp.outOctets;
+            g_s1Ms        = sampleMs;
+            g_s1IsHC      = snmp.isHC;
+            g_haveSample2 = false;
+          } else {
+            g_s2InOctets  = snmp.inOctets;
+            g_s2OutOctets = snmp.outOctets;
+            g_s2Ms        = sampleMs;
+            g_haveSample2 = true;
           }
 
-          g_s1InOctets  = g_s2InOctets;
-          g_s1OutOctets = g_s2OutOctets;
-          g_s1Ms        = g_s2Ms;
+          if (g_haveSample1 && g_haveSample2) {
+            float dt = (g_s2Ms - g_s1Ms) / 1000.0f;
+            if (dt >= 0.5f) {
+              uint64_t dIn = 0, dOut = 0;
+              bool inRange = true;
+              if (g_s1IsHC) {
+                if (g_s2InOctets  >= g_s1InOctets)
+                  dIn  = g_s2InOctets  - g_s1InOctets;
+                else
+                  inRange = false;
+                if (g_s2OutOctets >= g_s1OutOctets)
+                  dOut = g_s2OutOctets - g_s1OutOctets;
+                else
+                  inRange = false;
+              } else {
+                if ((uint32_t)g_s2InOctets  >= (uint32_t)g_s1InOctets)
+                  dIn  = (uint64_t)((uint32_t)g_s2InOctets  - (uint32_t)g_s1InOctets);
+                else
+                  inRange = false;
+                if ((uint32_t)g_s2OutOctets >= (uint32_t)g_s1OutOctets)
+                  dOut = (uint64_t)((uint32_t)g_s2OutOctets - (uint32_t)g_s1OutOctets);
+                else
+                  inRange = false;
+              }
+              if (inRange) {
+                double inBps  = (double)dIn  / dt * 8.0;
+                double outBps = (double)dOut / dt * 8.0;
+                if (isfinite(inBps)  && inBps  >= 0.0 && inBps  <= MAX_REASONABLE_BPS)
+                  t.inBps  = inBps;
+                if (isfinite(outBps) && outBps >= 0.0 && outBps <= MAX_REASONABLE_BPS)
+                  t.outBps = outBps;
+              }
+            }
+
+            g_s1InOctets  = g_s2InOctets;
+            g_s1OutOctets = g_s2OutOctets;
+            g_s1Ms        = g_s2Ms;
+          }
         }
       } else {
         g_snmpFailCount++;

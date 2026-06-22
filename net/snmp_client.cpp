@@ -35,6 +35,11 @@ static char g_oidHcOut[64];
 static int  g_counterMode = -1;
 static bool g_parseOk     = false;
 
+// Маркер «значение не получено». В эти переменные счётчики сбрасываются
+// перед опросом; если после ответа маркер остался — счётчик не пришёл.
+static constexpr uint64_t COUNTER64_SENTINEL = UINT64_MAX;
+static constexpr uint32_t COUNTER32_SENTINEL = UINT32_MAX;
+
 void snmpInit(IPAddress ip, uint16_t port, const char *community,
               int version, uint32_t ifIndex) {
   if (g_mgr || g_req) {
@@ -131,9 +136,13 @@ static void fillOutput(SnmpData &out, bool hc) {
   out.linkUp = (g_operStatus == 1);
   out.isHC   = hc;
   if (hc) {
+    out.countersValid = (g_hcInOctets  != COUNTER64_SENTINEL &&
+                         g_hcOutOctets != COUNTER64_SENTINEL);
     out.inOctets  = g_hcInOctets;
     out.outOctets = g_hcOutOctets;
   } else {
+    out.countersValid = (g_inOctets  != COUNTER32_SENTINEL &&
+                         g_outOctets != COUNTER32_SENTINEL);
     out.inOctets  = (uint64_t)g_inOctets;
     out.outOctets = (uint64_t)g_outOctets;
   }
@@ -145,8 +154,8 @@ bool snmpPoll(SnmpData &out) {
   if (g_counterMode == -1) {
     Serial.println("[SNMP] detecting counter mode...");
 
-    g_hcInOctets  = 0;
-    g_hcOutOctets = 0;
+    g_hcInOctets  = COUNTER64_SENTINEL;
+    g_hcOutOctets = COUNTER64_SENTINEL;
     if (pollOnce(g_cbHcIn, g_cbHcOut, 2000) && g_parseOk) {
       g_counterMode = 1;
       Serial.println("[SNMP] using HC (64-bit) counters");
@@ -157,8 +166,8 @@ bool snmpPoll(SnmpData &out) {
     }
 
     Serial.println("[SNMP] HC not available, trying 32-bit counters");
-    g_inOctets  = 0;
-    g_outOctets = 0;
+    g_inOctets  = COUNTER32_SENTINEL;
+    g_outOctets = COUNTER32_SENTINEL;
     if (pollOnce(g_cbIn, g_cbOut, 2000)) {
       g_counterMode = 0;
       Serial.println("[SNMP] using 32-bit counters");
@@ -173,8 +182,8 @@ bool snmpPoll(SnmpData &out) {
   }
 
   if (g_counterMode == 1) {
-    g_hcInOctets  = 0;
-    g_hcOutOctets = 0;
+    g_hcInOctets  = COUNTER64_SENTINEL;
+    g_hcOutOctets = COUNTER64_SENTINEL;
     if (pollOnce(g_cbHcIn, g_cbHcOut, 2000)) {
       fillOutput(out, true);
       Serial.printf("[SNMP] HC status=%d in=%llu out=%llu (linkUp=%d)\n",
@@ -185,8 +194,8 @@ bool snmpPoll(SnmpData &out) {
     return false;
   }
 
-  g_inOctets  = 0;
-  g_outOctets = 0;
+  g_inOctets  = COUNTER32_SENTINEL;
+  g_outOctets = COUNTER32_SENTINEL;
   if (pollOnce(g_cbIn, g_cbOut, 2000)) {
     fillOutput(out, false);
     Serial.printf("[SNMP] 32 status=%d in=%llu out=%llu (linkUp=%d)\n",

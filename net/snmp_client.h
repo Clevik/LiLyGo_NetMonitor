@@ -9,6 +9,7 @@ struct SnmpData {
   uint64_t outOctets  = 0;
   bool     valid      = false;
   bool     isHC       = false;
+  bool     countersValid = false;
 };
 
 void snmpInit(IPAddress ip, uint16_t port, const char *community,
