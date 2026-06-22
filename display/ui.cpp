@@ -3,8 +3,13 @@
 #include <Arduino_GFX_Library.h>
 #include <esp_heap_caps.h>
 #include <soc/soc_memory_types.h>
+#include <math.h>
+#include <string.h>
 
 #include "config.h"
+#if defined(HW_AMOLED_143)
+  #include "globe_frames.h"
+#endif
 #include "ui.h"
 
 static Arduino_DataBus *g_bus    = nullptr;
@@ -158,6 +163,333 @@ static void formatSpeed(double bps, char *val, size_t vLen, const char **unit) {
   }
 }
 
+static void updateTrafficHistory(const Telemetry &t) {
+  if (!t.dataValid) return;
+
+  uint32_t now = millis();
+  if (now - g_lastHistMs >= 1000) {
+    g_lastHistMs = now;
+    pushHistory((float)t.inBps, (float)t.outBps);
+  }
+}
+
+#if defined(HW_AMOLED_143)
+constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
+  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+}
+
+static constexpr uint16_t CLR_ROUND_DOWNLOAD = rgb565(0x00, 0xFF, 0x40);
+static constexpr uint16_t CLR_ROUND_UPLOAD   = rgb565(0x00, 0x80, 0xFF);
+static constexpr uint16_t CLR_ROUND_WARN     = rgb565(0xFF, 0xB0, 0x00);
+static constexpr uint16_t CLR_ROUND_ALARM    = rgb565(0xFF, 0x30, 0x30);
+static constexpr uint16_t CLR_ROUND_DIM_BLUE = rgb565(0x00, 0x18, 0x30);
+static constexpr uint16_t CLR_ROUND_DIM_GN   = rgb565(0x00, 0x28, 0x10);
+
+static int16_t centerYFromPdf(int16_t pdfY) {
+  return static_cast<int16_t>(SCREEN_H) - pdfY;
+}
+
+static int16_t textPixelWidth(const char *text, uint8_t size) {
+  return static_cast<int16_t>(strlen(text) * 6U * size);
+}
+
+static int16_t textPixelHeight(uint8_t size) {
+  return static_cast<int16_t>(8U * size);
+}
+
+static void drawTextCentered(const char *text,
+                             int16_t centerX,
+                             int16_t centerY,
+                             uint8_t size,
+                             uint16_t color,
+                             uint16_t bg = CLR_BG) {
+  g_canvas->setTextSize(size);
+  g_canvas->setTextColor(color, bg);
+  g_canvas->setCursor(centerX - textPixelWidth(text, size) / 2,
+                      centerY - textPixelHeight(size) / 2);
+  g_canvas->print(text);
+}
+
+static void drawTextCenteredGlow(const char *text,
+                                 int16_t centerX,
+                                 int16_t centerY,
+                                 uint8_t size,
+                                 uint16_t color,
+                                 uint16_t glow) {
+  drawTextCentered(text, centerX - 1, centerY, size, glow);
+  drawTextCentered(text, centerX + 1, centerY, size, glow);
+  drawTextCentered(text, centerX, centerY - 1, size, glow);
+  drawTextCentered(text, centerX, centerY + 1, size, glow);
+  drawTextCentered(text, centerX, centerY, size, color);
+}
+
+static uint16_t statusColor(const Telemetry &t) {
+  if (!t.dataValid) return CLR_DIM;
+  if (t.linkUp) {
+    if (t.pingLoss && !t.linkUncertain) return CLR_ROUND_ALARM;
+    if (t.linkUncertain) return CLR_ROUND_WARN;
+    return CLR_ROUND_DOWNLOAD;
+  }
+  if (t.pingValid && !t.pingLoss) return CLR_ROUND_WARN;
+  return CLR_ROUND_ALARM;
+}
+
+static const char *statusText(const Telemetry &t) {
+  if (!t.dataValid) return "----";
+  return t.linkUp ? "UP" : "DOWN";
+}
+
+static void formatSpeedCompact(double bps, char *val, size_t vLen,
+                               char *unit, size_t uLen) {
+  if (!isfinite(bps) || bps <= 0.0) {
+    snprintf(val, vLen, "-");
+    snprintf(unit, uLen, "Mbps");
+    return;
+  }
+
+  double mbps = bps / 1000000.0;
+  if (mbps >= 1.0) {
+    snprintf(val, vLen, (mbps < 100.0) ? "%.1f" : "%.0f", mbps);
+    snprintf(unit, uLen, "Mbps");
+    return;
+  }
+
+  double kbps = bps / 1000.0;
+  if (kbps >= 1.0) {
+    snprintf(val, vLen, "%.0f", kbps);
+    snprintf(unit, uLen, "Kbps");
+    return;
+  }
+
+  snprintf(val, vLen, "%.0f", bps);
+  snprintf(unit, uLen, "bps");
+}
+
+static uint16_t historyStartIndex() {
+  return (g_histHead + GRAPH_POINTS - g_histCount) % GRAPH_POINTS;
+}
+
+static uint16_t historyIndexFromOldest(uint16_t offset) {
+  return (historyStartIndex() + offset) % GRAPH_POINTS;
+}
+
+static float historyMax(const float *data, uint16_t offset, uint16_t count) {
+  float maxVal = 1.0f;
+  for (uint16_t i = 0; i < count; i++) {
+    uint16_t idx = historyIndexFromOldest(offset + i);
+    if (data[idx] > maxVal) maxVal = data[idx];
+  }
+  return maxVal;
+}
+
+static void drawLineGraph(const float *data,
+                          int16_t x,
+                          int16_t y,
+                          int16_t w,
+                          int16_t h,
+                          uint16_t color,
+                          uint16_t glowColor) {
+  if (g_histCount < 2) return;
+
+  uint16_t samples = g_histCount;
+  if (samples > static_cast<uint16_t>(w)) samples = static_cast<uint16_t>(w);
+  uint16_t offset = g_histCount - samples;
+  float maxVal = historyMax(data, offset, samples);
+
+  int16_t prevX = -1;
+  int16_t prevY = -1;
+  for (uint16_t i = 0; i < samples; i++) {
+    uint16_t idx = historyIndexFromOldest(offset + i);
+    int16_t px = x + static_cast<int16_t>((static_cast<int32_t>(i) * (w - 1)) / (samples - 1));
+    int16_t py = y + h - 1 - static_cast<int16_t>((data[idx] / maxVal) * (h - 1));
+    if (prevX >= 0) {
+      g_canvas->drawLine(prevX, prevY + 2, px, py + 2, glowColor);
+      g_canvas->drawLine(prevX, prevY + 1, px, py + 1, glowColor);
+      g_canvas->drawLine(prevX, prevY, px, py, color);
+    }
+    prevX = px;
+    prevY = py;
+  }
+}
+
+static void drawArcSegment(int16_t cx,
+                           int16_t cy,
+                           int16_t radius,
+                           float startDeg,
+                           float endDeg,
+                           uint16_t color,
+                           uint8_t thickness = 1) {
+  static constexpr float DEG = 3.1415926535f / 180.0f;
+  int16_t prevX = 0;
+  int16_t prevY = 0;
+  bool havePrev = false;
+  float step = (endDeg >= startDeg) ? 4.0f : -4.0f;
+  for (float a = startDeg; (step > 0.0f) ? (a <= endDeg) : (a >= endDeg); a += step) {
+    float rad = a * DEG;
+    int16_t px = cx + static_cast<int16_t>(cosf(rad) * radius);
+    int16_t py = cy - static_cast<int16_t>(sinf(rad) * radius);
+    if (havePrev) {
+      for (uint8_t t = 0; t < thickness; t++) {
+        g_canvas->drawLine(prevX, prevY + t, px, py + t, color);
+      }
+    }
+    prevX = px;
+    prevY = py;
+    havePrev = true;
+  }
+}
+
+static void drawHistoryArc(const float *data,
+                           float startDeg,
+                           float endDeg,
+                           uint16_t color,
+                           uint16_t dimColor) {
+  static constexpr float DEG = 3.1415926535f / 180.0f;
+  constexpr int16_t cx = 233;
+  constexpr int16_t cy = 233;
+  constexpr int16_t radius = 205;
+  constexpr uint16_t maxSamples = 60;
+
+  drawArcSegment(cx, cy, radius, startDeg, endDeg, dimColor, 2);
+
+  if (g_histCount < 2) return;
+
+  uint16_t samples = g_histCount;
+  if (samples > maxSamples) samples = maxSamples;
+  uint16_t offset = g_histCount - samples;
+  float maxVal = historyMax(data, offset, samples);
+
+  for (uint16_t i = 0; i < samples; i++) {
+    uint16_t idx = historyIndexFromOldest(offset + i);
+    float pos = (samples <= 1) ? 0.0f : (float)i / (float)(samples - 1);
+    float angle = startDeg + (endDeg - startDeg) * pos;
+    float norm = data[idx] / maxVal;
+    if (norm < 0.04f) norm = 0.04f;
+    if (norm > 1.0f) norm = 1.0f;
+
+    int16_t len = 4 + static_cast<int16_t>(norm * 24.0f);
+    float rad = angle * DEG;
+    int16_t x0 = cx + static_cast<int16_t>(cosf(rad) * (radius + 2));
+    int16_t y0 = cy - static_cast<int16_t>(sinf(rad) * (radius + 2));
+    int16_t x1 = cx + static_cast<int16_t>(cosf(rad) * (radius + 2 - len));
+    int16_t y1 = cy - static_cast<int16_t>(sinf(rad) * (radius + 2 - len));
+    g_canvas->drawLine(x0, y0, x1, y1, color);
+    g_canvas->drawLine(x0, y0 + 1, x1, y1 + 1, color);
+  }
+}
+
+static void drawEllipse(int16_t cx,
+                        int16_t cy,
+                        int16_t rx,
+                        int16_t ry,
+                        uint16_t color) {
+  int16_t prevX = 0;
+  int16_t prevY = 0;
+  bool havePrev = false;
+  for (int deg = 0; deg <= 360; deg += 8) {
+    float rad = deg * (3.1415926535f / 180.0f);
+    int16_t px = cx + static_cast<int16_t>(cosf(rad) * rx);
+    int16_t py = cy + static_cast<int16_t>(sinf(rad) * ry);
+    if (havePrev) g_canvas->drawLine(prevX, prevY, px, py, color);
+    prevX = px;
+    prevY = py;
+    havePrev = true;
+  }
+}
+
+static void drawWifiIcon(int16_t x, int16_t y, uint16_t color) {
+  int16_t baseY = y + 22;
+  drawArcSegment(x, baseY, 36, 46.0f, 134.0f, color, 4);
+  drawArcSegment(x, baseY, 25, 50.0f, 130.0f, color, 4);
+  drawArcSegment(x, baseY, 14, 55.0f, 125.0f, color, 4);
+  g_canvas->fillCircle(x, baseY - 1, 5, color);
+}
+
+static void drawGlobeIcon(int16_t x, int16_t y, uint16_t color) {
+  g_canvas->drawCircle(x, y, 29, color);
+  g_canvas->drawCircle(x, y, 28, color);
+  g_canvas->drawLine(x - 28, y, x + 28, y, color);
+  g_canvas->drawLine(x, y - 28, x, y + 28, color);
+  drawEllipse(x, y, 12, 28, color);
+  drawEllipse(x, y, 22, 28, color);
+}
+
+static void drawDownArrow(int16_t x, int16_t y, uint16_t color) {
+  g_canvas->fillRect(x - 5, y - 26, 10, 34, color);
+  g_canvas->fillTriangle(x - 22, y + 4, x + 22, y + 4, x, y + 29, color);
+}
+
+static void drawUpArrow(int16_t x, int16_t y, uint16_t color) {
+  g_canvas->fillRect(x - 5, y - 8, 10, 34, color);
+  g_canvas->fillTriangle(x - 22, y - 4, x + 22, y - 4, x, y - 29, color);
+}
+
+static void drawGlobeFrame(int16_t centerX, int16_t centerY) {
+  uint8_t frame = (millis() / 42U) % GLOBE_FRAME_COUNT;
+  int16_t x0 = centerX - (GLOBE_MASK_W * GLOBE_CELL_PX) / 2;
+  int16_t y0 = centerY - (GLOBE_MASK_H * GLOBE_CELL_PX) / 2;
+
+  g_canvas->fillCircle(centerX, centerY, 80, rgb565(0x00, 0x06, 0x10));
+  g_canvas->drawCircle(centerX, centerY, 80, CLR_ROUND_UPLOAD);
+  g_canvas->drawCircle(centerX, centerY, 78, CLR_ROUND_DIM_BLUE);
+
+  for (uint8_t y = 0; y < GLOBE_MASK_H; y++) {
+    for (uint8_t byteX = 0; byteX < GLOBE_MASK_W / 8; byteX++) {
+      uint16_t offset = y * (GLOBE_MASK_W / 8) + byteX;
+      uint8_t mask = pgm_read_byte(&GLOBE_FRAME_DATA[frame][offset]);
+      if (!mask) continue;
+      for (uint8_t bit = 0; bit < 8; bit++) {
+        if (mask & (0x80 >> bit)) {
+          int16_t px = x0 + (byteX * 8 + bit) * GLOBE_CELL_PX;
+          int16_t py = y0 + y * GLOBE_CELL_PX;
+          g_canvas->fillRect(px, py, GLOBE_CELL_PX, GLOBE_CELL_PX, CLR_ROUND_UPLOAD);
+        }
+      }
+    }
+  }
+}
+
+static void drawPingBlock(int16_t centerX,
+                          int16_t valueY,
+                          bool valid,
+                          bool loss,
+                          uint32_t ms,
+                          uint16_t color) {
+  if (loss || !valid) {
+    drawTextCentered(loss ? "loss" : "--", centerX, valueY - 5, 4,
+                     loss ? CLR_ROUND_ALARM : CLR_DIM);
+    drawTextCentered("ms", centerX, valueY + 30, 3, loss ? CLR_ROUND_ALARM : CLR_DIM);
+    return;
+  }
+
+  char buf[12];
+  snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(ms));
+  drawTextCenteredGlow(buf, centerX, valueY - 7, 5, color, CLR_ROUND_DIM_BLUE);
+  drawTextCentered("ms", centerX, valueY + 31, 3, color);
+}
+
+static void drawSpeedBlock(int16_t arrowX,
+                           int16_t valueX,
+                           bool upload,
+                           double bps) {
+  uint16_t color = upload ? CLR_ROUND_UPLOAD : CLR_ROUND_DOWNLOAD;
+  char value[16];
+  char unit[8];
+  formatSpeedCompact(bps, value, sizeof(value), unit, sizeof(unit));
+
+  int16_t valueY = centerYFromPdf(130);
+  int16_t unitY  = centerYFromPdf(95);
+  if (upload) {
+    drawUpArrow(arrowX, centerYFromPdf(120), color);
+  } else {
+    drawDownArrow(arrowX, centerYFromPdf(120), color);
+  }
+  drawTextCenteredGlow(value, valueX, valueY, 5, CLR_TEXT,
+                       upload ? CLR_ROUND_DIM_BLUE : CLR_ROUND_DIM_GN);
+  drawTextCentered(unit, valueX, unitY, 3, CLR_TEXT);
+}
+#endif  // defined(HW_AMOLED_143)
+
 void uiShowApConfig(const char *apName, const char *apIp) {
   g_canvas->fillScreen(CLR_BG);
 
@@ -248,15 +580,54 @@ void uiShowReconnectWait(const char *ssid, uint32_t remainSec) {
   flush();
 }
 
-void uiShowMain(const Telemetry &t) {
-  if (t.dataValid) {
-    uint32_t now = millis();
-    if (now - g_lastHistMs >= 1000) {
-      g_lastHistMs = now;
-      pushHistory((float)t.inBps, (float)t.outBps);
-    }
-  }
+#if defined(HW_AMOLED_143)
+static void uiShowMainRound(const Telemetry &t) {
+  g_canvas->fillScreen(CLR_BG);
 
+  // Тонкие внутренние кольца помогают круглому экрану выглядеть как макет,
+  // но остаются внутри физической active area.
+  g_canvas->drawCircle(233, 233, 228, rgb565(0x28, 0x2D, 0x33));
+  g_canvas->drawCircle(233, 233, 223, rgb565(0x11, 0x16, 0x1C));
+
+  drawHistoryArc(g_histIn,  130.0f, 230.0f, CLR_ROUND_DOWNLOAD, CLR_ROUND_DIM_GN);
+  drawHistoryArc(g_histOut, -50.0f,  50.0f, CLR_ROUND_UPLOAD,   CLR_ROUND_DIM_BLUE);
+
+  drawLineGraph(g_histIn,  60, centerYFromPdf(72) - 28, 346, 28,
+                CLR_ROUND_DOWNLOAD, CLR_ROUND_DIM_GN);
+  drawLineGraph(g_histOut, 60, centerYFromPdf(35) - 24, 346, 24,
+                CLR_ROUND_UPLOAD, CLR_ROUND_DIM_BLUE);
+
+  drawGlobeFrame(233, centerYFromPdf(255));
+
+  drawWifiIcon(115, centerYFromPdf(275), CLR_ROUND_DOWNLOAD);
+  drawGlobeIcon(351, centerYFromPdf(275), CLR_ROUND_UPLOAD);
+
+  drawTextCentered(g_routerIp, 233, centerYFromPdf(425), 4, CLR_TEXT);
+  drawTextCenteredGlow(statusText(t), 233, centerYFromPdf(360), 9,
+                       statusColor(t), statusColor(t));
+
+  bool routerValid = t.dataValid && t.routerPingValid;
+  drawPingBlock(115, centerYFromPdf(210),
+                routerValid, t.dataValid && !t.routerPingValid,
+                t.routerPingMs, CLR_ROUND_DOWNLOAD);
+  drawPingBlock(351, centerYFromPdf(210),
+                t.dataValid && t.pingValid, t.dataValid && t.pingLoss,
+                t.pingMs, CLR_ROUND_UPLOAD);
+
+  g_canvas->drawLine(233, centerYFromPdf(124), 233, centerYFromPdf(78),
+                     rgb565(0x80, 0x80, 0x80));
+  drawSpeedBlock(115, 165, false, t.inBps);
+  drawSpeedBlock(290, 340, true,  t.outBps);
+
+  String ip = WiFi.localIP().toString();
+  drawTextCentered("DEVICE IP", 233, 426, 2, CLR_TEXT);
+  drawTextCentered(ip.c_str(), 233, 452, 3, CLR_TEXT);
+
+  flush();
+}
+#endif  // defined(HW_AMOLED_143)
+
+static void uiShowMainRect(const Telemetry &t) {
   g_canvas->fillScreen(CLR_BG);
 
   // --- Зона A: шапка (70px) ---
@@ -498,6 +869,15 @@ void uiShowMain(const Telemetry &t) {
   }
 
   flush();
+}
+
+void uiShowMain(const Telemetry &t) {
+  updateTrafficHistory(t);
+#if defined(HW_AMOLED_143)
+  uiShowMainRound(t);
+#else
+  uiShowMainRect(t);
+#endif
 }
 
 void uiUpdateMain(const Telemetry &t) {

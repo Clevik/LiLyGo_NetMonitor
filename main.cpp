@@ -25,6 +25,12 @@ static uint32_t   g_stateEnteredMs = 0;
 static uint32_t   g_lastUiMs       = 0;
 static uint32_t   g_keyDownMs      = 0;
 
+#if defined(HW_AMOLED_143)
+static constexpr uint32_t UI_RUNNING_FRAME_MS = 100;
+#else
+static constexpr uint32_t UI_RUNNING_FRAME_MS = 500;
+#endif
+
 // Ретрай Wi-Fi внутри состояния WifiConnect.
 static bool       g_wifiWaiting    = false;  // идёт ли пауза между попытками
 static uint32_t   g_nextAttemptMs  = 0;      // момент следующей попытки
@@ -209,7 +215,7 @@ void loop() {
         uiCycleBrightness();
       }
 
-      if (now - g_lastUiMs >= 500) {
+      if (now - g_lastUiMs >= UI_RUNNING_FRAME_MS) {
         g_lastUiMs = now;
         g_telemetry = telemetrySnapshot();
         uiUpdateMain(g_telemetry);
