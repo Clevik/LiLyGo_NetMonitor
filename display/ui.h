@@ -14,6 +14,8 @@ struct Telemetry {
   double   outBps         = 0.0;
   uint32_t interfaceUptimeSec = 0;
   bool     interfaceUptimeValid = false;
+  char     interfaceAlias[32] = {};
+  bool     interfaceAliasValid = false;
   uint32_t lastUpdateMs   = 0;
   bool     dataValid      = false;
 };

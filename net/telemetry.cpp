@@ -115,6 +115,13 @@ static void netTask(void *arg) {
         t.linkUp = snmp.linkUp;
         t.interfaceUptimeSec = snmp.interfaceStateUptimeSec;
         t.interfaceUptimeValid = snmp.interfaceStateUptimeValid;
+        t.interfaceAliasValid = snmp.interfaceAliasValid;
+        if (snmp.interfaceAliasValid) {
+          strncpy(t.interfaceAlias, snmp.interfaceAlias, sizeof(t.interfaceAlias) - 1);
+          t.interfaceAlias[sizeof(t.interfaceAlias) - 1] = '\0';
+        } else {
+          t.interfaceAlias[0] = '\0';
+        }
 
         if (snmp.countersValid) {
           uint32_t sampleMs = millis();

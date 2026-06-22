@@ -192,6 +192,16 @@ static void formatInterfaceUptime(uint32_t uptimeSec, char *out, size_t outLen) 
   }
 }
 
+static void formatInterfaceUptimeTitle(const Telemetry &t,
+                                       char *out,
+                                       size_t outLen) {
+  if (t.interfaceAliasValid && t.interfaceAlias[0] != '\0') {
+    snprintf(out, outLen, "UPTIME %s", t.interfaceAlias);
+  } else {
+    snprintf(out, outLen, "UPTIME");
+  }
+}
+
 static void updateTrafficHistory(const Telemetry &t) {
   if (!t.dataValid) return;
 
@@ -636,8 +646,11 @@ static void uiShowMainRound(const Telemetry &t) {
   drawGlobeIcon(351, centerYFromPdf(275), CLR_ROUND_UPLOAD);
 
   if (shouldShowInterfaceUptime(t)) {
+    char title[48];
     char uptime[32];
+    formatInterfaceUptimeTitle(t, title, sizeof(title));
     formatInterfaceUptime(t.interfaceUptimeSec, uptime, sizeof(uptime));
+    drawTextCentered(title, 233, 14, 2, CLR_DIM);
     drawTextCentered(uptime, 233, centerYFromPdf(425), 4, CLR_TEXT);
   } else {
     drawTextCentered(g_routerIp, 233, centerYFromPdf(425), 4, CLR_TEXT);
@@ -682,7 +695,13 @@ static void uiShowMainRect(const Telemetry &t) {
   g_canvas->setTextSize(3);
   g_canvas->setTextColor(CLR_DIM);
   g_canvas->setCursor(8, ZONE_A_Y + 4);
-  g_canvas->print(showUptime ? "UPTIME" : "ROUTER");
+  if (showUptime) {
+    char title[48];
+    formatInterfaceUptimeTitle(t, title, sizeof(title));
+    g_canvas->print(title);
+  } else {
+    g_canvas->print("ROUTER");
+  }
 
   // IP роутера или uptime интерфейса внизу зоны.
   char routerInfo[32];
