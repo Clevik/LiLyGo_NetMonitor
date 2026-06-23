@@ -187,7 +187,7 @@ static void fillOutput(SnmpData &out, bool hc) {
 
   bool ticksValid = (g_sysUpTimeTicks != TIMETICKS_SENTINEL &&
                      g_ifLastChangeTicks != TIMETICKS_SENTINEL);
-  if (out.linkUp && ticksValid && g_ifLastChangeTicks > 0) {
+  if (out.linkUp && ticksValid) {
     uint32_t stateTicks = g_sysUpTimeTicks - g_ifLastChangeTicks;
     out.interfaceStateUptimeSec = stateTicks / 100U;
     out.interfaceStateUptimeValid = true;
