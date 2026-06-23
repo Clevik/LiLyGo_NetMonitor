@@ -85,6 +85,53 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   req->send(200, "text/plain", "Saved! Applying...");
 }
 
+static void handleSaveRequest(AsyncWebServerRequest *req) {
+  if (req->contentLength() > MAX_SETTINGS_BODY) {
+    if (req->_tempObject) {
+      delete static_cast<String *>(req->_tempObject);
+      req->_tempObject = nullptr;
+    }
+    req->send(413, "text/plain", "Request too large");
+    return;
+  }
+
+  String *body = static_cast<String *>(req->_tempObject);
+  req->_tempObject = nullptr;
+  if (!body) {
+    req->send(400, "text/plain", "Missing JSON");
+    return;
+  }
+
+  handleSave(req,
+             reinterpret_cast<uint8_t *>(const_cast<char *>(body->c_str())),
+             body->length());
+  delete body;
+}
+
+static void handleSaveBody(AsyncWebServerRequest *req,
+                           uint8_t *data,
+                           size_t len,
+                           size_t index,
+                           size_t total) {
+  if (total > MAX_SETTINGS_BODY) return;
+
+  if (index == 0) {
+    if (req->_tempObject) {
+      delete static_cast<String *>(req->_tempObject);
+      req->_tempObject = nullptr;
+    }
+    auto *body = new String();
+    body->reserve(total + 1);
+    req->_tempObject = body;
+  }
+
+  auto *body = static_cast<String *>(req->_tempObject);
+  if (!body) return;
+  for (size_t i = 0; i < len; i++) {
+    *body += static_cast<char>(data[i]);
+  }
+}
+
 static void handleUpload(AsyncWebServerRequest *req, const String &filename,
                          size_t index, uint8_t *data, size_t len, bool final) {
   if (!index) {
@@ -136,15 +183,10 @@ void otaBegin(Settings &settings) {
 
   g_srv->on("/api/settings", HTTP_GET, handleApiSettings);
 
-  g_srv->on("/save", HTTP_ANY,
-    [](AsyncWebServerRequest *req) {
-      req->redirect("/");
-    },
-    nullptr,
-    [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t, size_t) {
-      handleSave(req, data, len);
-    }
-  );
+  g_srv->on("/save", HTTP_POST, handleSaveRequest, nullptr, handleSaveBody);
+  g_srv->on("/save", HTTP_GET, [](AsyncWebServerRequest *req) {
+    req->redirect("/");
+  });
 
   g_srv->on("/ota", HTTP_GET, [](AsyncWebServerRequest *req) {
     req->send(LittleFS, "/ota/ota.html", "text/html");

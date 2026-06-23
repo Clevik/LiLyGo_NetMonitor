@@ -727,43 +727,52 @@ static void uiShowMainRect(const Telemetry &t) {
   g_canvas->setCursor(8, ZONE_A_Y + 44);
   g_canvas->print(routerInfo);
 
+  constexpr uint8_t RECT_STATUS_TEXT_SIZE = 3;
+  constexpr int16_t RECT_STATUS_Y = ZONE_A_Y + 36;
+  const char *rectStatusText = "----";
+  uint16_t rectStatusColor = CLR_DIM;
+  int16_t rectStatusX = 255;
+
+  if (t.dataValid) {
+    if (t.linkUp) {
+      if (t.pingLoss && !t.linkUncertain) {
+        rectStatusColor = CLR_STATUS_DN;
+      } else if (t.linkUncertain) {
+        rectStatusColor = CLR_STATUS_UNC;
+      } else {
+        rectStatusColor = CLR_STATUS_UP;
+      }
+      rectStatusText = " UP ";
+      rectStatusX = 275;
+    } else {
+      if (t.pingValid && !t.pingLoss) {
+        rectStatusColor = CLR_STATUS_UNC;
+      } else {
+        rectStatusColor = CLR_STATUS_DN;
+      }
+      rectStatusText = "DOWN";
+      rectStatusX = 255;
+    }
+  }
+
+  int16_t statusCenterX =
+      rectStatusX +
+      static_cast<int16_t>(strlen(rectStatusText) * 6U * RECT_STATUS_TEXT_SIZE) / 2;
+
   if (t.interfaceAliasValid && t.interfaceAlias[0] != '\0') {
-    g_canvas->setTextSize(2);
+    g_canvas->setTextSize(3);
     g_canvas->setTextColor(CLR_TEXT);
-    int16_t aliasX = 300 - static_cast<int16_t>(strlen(t.interfaceAlias) * 6U * 2U) / 2;
-    if (aliasX < 245) aliasX = 245;
+    int16_t aliasX =
+        statusCenterX -
+        static_cast<int16_t>(strlen(t.interfaceAlias) * 6U * 3U) / 2;
     g_canvas->setCursor(aliasX, ZONE_A_Y + 4);
     g_canvas->print(t.interfaceAlias);
   }
 
-  // Статус UP/DOWN выровнен нижним краем по нижнему краю IP/uptime слева.
-  if (t.dataValid) {
-    g_canvas->setTextSize(4);
-    if (t.linkUp) {
-      if (t.pingLoss && !t.linkUncertain) {
-        g_canvas->setTextColor(CLR_STATUS_DN);
-      } else if (t.linkUncertain) {
-        g_canvas->setTextColor(CLR_STATUS_UNC);
-      } else {
-        g_canvas->setTextColor(CLR_STATUS_UP);
-      }
-      g_canvas->setCursor(275, ZONE_A_Y + 36);
-      g_canvas->print(" UP ");
-    } else {
-      if (t.pingValid && !t.pingLoss) {
-        g_canvas->setTextColor(CLR_STATUS_UNC);
-      } else {
-        g_canvas->setTextColor(CLR_STATUS_DN);
-      }
-      g_canvas->setCursor(255, ZONE_A_Y + 36);
-      g_canvas->print("DOWN");
-    }
-  } else {
-    g_canvas->setTextSize(4);
-    g_canvas->setTextColor(CLR_DIM);
-    g_canvas->setCursor(255, ZONE_A_Y + 36);
-    g_canvas->print("----");
-  }
+  g_canvas->setTextSize(RECT_STATUS_TEXT_SIZE);
+  g_canvas->setTextColor(rectStatusColor);
+  g_canvas->setCursor(rectStatusX, RECT_STATUS_Y);
+  g_canvas->print(rectStatusText);
 
   // Правая колонка: пинги (textSize 3 = 18x24)
   // Верхний: пинг до внешнего хоста
