@@ -166,9 +166,21 @@ static void formatSpeed(double bps, char *val, size_t vLen, const char **unit) {
 
 static constexpr uint32_t ROUTER_INFO_SWITCH_MS = 5000;
 
-static bool shouldShowInterfaceUptime(const Telemetry &t) {
-  return t.interfaceUptimeValid &&
-         ((millis() / ROUTER_INFO_SWITCH_MS) % 2U) == 1U;
+enum class RouterInfoMode : uint8_t {
+  Ip,
+  SystemUptime,
+  WanUptime,
+};
+
+static RouterInfoMode currentRouterInfoMode(const Telemetry &t) {
+  uint8_t count = 1;
+  if (t.systemUptimeValid) count++;
+  if (t.wanUptimeValid) count++;
+
+  uint8_t slot = (millis() / ROUTER_INFO_SWITCH_MS) % count;
+  if (slot == 0) return RouterInfoMode::Ip;
+  if (t.systemUptimeValid && slot == 1) return RouterInfoMode::SystemUptime;
+  return RouterInfoMode::WanUptime;
 }
 
 static void formatInterfaceUptime(uint32_t uptimeSec, char *out, size_t outLen) {
@@ -192,13 +204,25 @@ static void formatInterfaceUptime(uint32_t uptimeSec, char *out, size_t outLen) 
   }
 }
 
-static void formatInterfaceUptimeTitle(const Telemetry &t,
-                                       char *out,
-                                       size_t outLen) {
-  if (t.interfaceAliasValid && t.interfaceAlias[0] != '\0') {
-    snprintf(out, outLen, "UPTIME %s", t.interfaceAlias);
-  } else {
-    snprintf(out, outLen, "UPTIME");
+static void formatRouterInfo(const Telemetry &t,
+                             char *title,
+                             size_t titleLen,
+                             char *value,
+                             size_t valueLen) {
+  switch (currentRouterInfoMode(t)) {
+    case RouterInfoMode::SystemUptime:
+      snprintf(title, titleLen, "UPTIME SYSTEM");
+      formatInterfaceUptime(t.systemUptimeSec, value, valueLen);
+      return;
+    case RouterInfoMode::WanUptime:
+      snprintf(title, titleLen, "UPTIME WAN");
+      formatInterfaceUptime(t.wanUptimeSec, value, valueLen);
+      return;
+    case RouterInfoMode::Ip:
+    default:
+      snprintf(title, titleLen, "ROUTER");
+      snprintf(value, valueLen, "%s", g_routerIp);
+      return;
   }
 }
 
@@ -645,15 +669,12 @@ static void uiShowMainRound(const Telemetry &t) {
   drawWifiIcon(115, centerYFromPdf(275), CLR_ROUND_DOWNLOAD);
   drawGlobeIcon(351, centerYFromPdf(275), CLR_ROUND_UPLOAD);
 
-  if (shouldShowInterfaceUptime(t)) {
+  {
     char title[48];
-    char uptime[32];
-    formatInterfaceUptimeTitle(t, title, sizeof(title));
-    formatInterfaceUptime(t.interfaceUptimeSec, uptime, sizeof(uptime));
+    char value[32];
+    formatRouterInfo(t, title, sizeof(title), value, sizeof(value));
     drawTextCentered(title, 233, 14, 2, CLR_DIM);
-    drawTextCentered(uptime, 233, centerYFromPdf(425), 4, CLR_TEXT);
-  } else {
-    drawTextCentered(g_routerIp, 233, centerYFromPdf(425), 4, CLR_TEXT);
+    drawTextCentered(value, 233, centerYFromPdf(425), 4, CLR_TEXT);
   }
   drawTextCenteredGlow(statusText(t), 233, centerYFromPdf(360), 9,
                        statusColor(t), statusColor(t));
@@ -689,33 +710,33 @@ static void uiShowMainRect(const Telemetry &t) {
 
   g_canvas->fillRect(0, ZONE_A_Y, SCREEN_W, ZONE_A_H, CLR_BG);
 
-  bool showUptime = shouldShowInterfaceUptime(t);
+  char routerTitle[48];
+  char routerInfo[32];
+  formatRouterInfo(t, routerTitle, sizeof(routerTitle),
+                   routerInfo, sizeof(routerInfo));
 
   // ROUTER / UPTIME (textSize 3 = 18x24)
   g_canvas->setTextSize(3);
   g_canvas->setTextColor(CLR_DIM);
   g_canvas->setCursor(8, ZONE_A_Y + 4);
-  if (showUptime) {
-    char title[48];
-    formatInterfaceUptimeTitle(t, title, sizeof(title));
-    g_canvas->print(title);
-  } else {
-    g_canvas->print("ROUTER");
-  }
+  g_canvas->print(routerTitle);
 
   // IP роутера или uptime интерфейса внизу зоны.
-  char routerInfo[32];
-  if (showUptime) {
-    formatInterfaceUptime(t.interfaceUptimeSec, routerInfo, sizeof(routerInfo));
-  } else {
-    snprintf(routerInfo, sizeof(routerInfo), "%s", g_routerIp);
-  }
   g_canvas->setTextSize(3);
   g_canvas->setTextColor(CLR_TEXT);
   g_canvas->setCursor(8, ZONE_A_Y + 44);
   g_canvas->print(routerInfo);
 
-  // Статус UP/DOWN по центру вертикали (textSize 4 = 24x32, center y = 70/2-16=19)
+  if (t.interfaceAliasValid && t.interfaceAlias[0] != '\0') {
+    g_canvas->setTextSize(2);
+    g_canvas->setTextColor(CLR_TEXT);
+    int16_t aliasX = 300 - static_cast<int16_t>(strlen(t.interfaceAlias) * 6U * 2U) / 2;
+    if (aliasX < 245) aliasX = 245;
+    g_canvas->setCursor(aliasX, ZONE_A_Y + 4);
+    g_canvas->print(t.interfaceAlias);
+  }
+
+  // Статус UP/DOWN выровнен нижним краем по нижнему краю IP/uptime слева.
   if (t.dataValid) {
     g_canvas->setTextSize(4);
     if (t.linkUp) {
@@ -726,7 +747,7 @@ static void uiShowMainRect(const Telemetry &t) {
       } else {
         g_canvas->setTextColor(CLR_STATUS_UP);
       }
-      g_canvas->setCursor(275, ZONE_A_Y + 19);
+      g_canvas->setCursor(275, ZONE_A_Y + 36);
       g_canvas->print(" UP ");
     } else {
       if (t.pingValid && !t.pingLoss) {
@@ -734,13 +755,13 @@ static void uiShowMainRect(const Telemetry &t) {
       } else {
         g_canvas->setTextColor(CLR_STATUS_DN);
       }
-      g_canvas->setCursor(255, ZONE_A_Y + 19);
+      g_canvas->setCursor(255, ZONE_A_Y + 36);
       g_canvas->print("DOWN");
     }
   } else {
     g_canvas->setTextSize(4);
     g_canvas->setTextColor(CLR_DIM);
-    g_canvas->setCursor(255, ZONE_A_Y + 19);
+    g_canvas->setCursor(255, ZONE_A_Y + 36);
     g_canvas->print("----");
   }
 

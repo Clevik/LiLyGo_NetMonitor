@@ -7,11 +7,13 @@ struct SnmpData {
   bool     linkUp                    = false;
   uint64_t inOctets                  = 0;
   uint64_t outOctets                 = 0;
+  uint32_t systemUptimeSec           = 0;
   uint32_t interfaceStateUptimeSec   = 0;
   char     interfaceAlias[32]        = {};
   bool     valid                     = false;
   bool     isHC                      = false;
   bool     countersValid             = false;
+  bool     systemUptimeValid         = false;
   bool     interfaceStateUptimeValid = false;
   bool     interfaceAliasValid       = false;
 };

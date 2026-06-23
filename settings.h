@@ -7,7 +7,7 @@
 #include <Arduino.h>
 
 // Версия схемы конфигурации (для будущих миграций).
-constexpr uint16_t CONFIG_SCHEMA_VERSION = 1;
+constexpr uint16_t CONFIG_SCHEMA_VERSION = 2;
 constexpr uint32_t SETTINGS_INTERVAL_MIN_SEC = 1;
 constexpr uint32_t SETTINGS_INTERVAL_MAX_SEC = 3600;
 constexpr uint32_t SETTINGS_WIFI_RETRY_MIN_SEC = 1;
@@ -43,6 +43,8 @@ struct Settings {
   String      snmpCommunity  = "public";
   uint32_t    ifIndex        = 0;  // индекс WAN-интерфейса (IF-MIB), должен быть > 0
   String      ifName;              // имя интерфейса (опционально)
+  String      routerApiLogin;      // логин Keenetic RCI/API для WAN uptime
+  String      routerApiPassword;   // пароль Keenetic RCI/API для WAN uptime
 
   // --- Пинг ---
   String      pingHost       = "8.8.8.8";

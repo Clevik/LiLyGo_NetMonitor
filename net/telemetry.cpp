@@ -7,6 +7,7 @@
 
 #include "telemetry.h"
 #include "snmp_client.h"
+#include "keenetic_rci.h"
 #include "config.h"
 
 static SemaphoreHandle_t g_mutex      = nullptr;
@@ -43,6 +44,9 @@ static uint16_t  g_snmpPort      = 161;
 static char      g_snmpCommunity[32] = "public";
 static int       g_snmpVersion   = 1;
 static uint32_t  g_ifIndex       = 0;
+static char      g_routerApiLogin[64];
+static char      g_routerApiPassword[64];
+static bool      g_routerApiConfigured = false;
 
 static TaskHandle_t currentTaskHandle() {
   portENTER_CRITICAL(&g_taskMux);
@@ -113,6 +117,8 @@ static void netTask(void *arg) {
       if (snmpPoll(snmp)) {
         g_snmpFailCount = 0;
         t.linkUp = snmp.linkUp;
+        t.systemUptimeSec = snmp.systemUptimeSec;
+        t.systemUptimeValid = snmp.systemUptimeValid;
         t.interfaceUptimeSec = snmp.interfaceStateUptimeSec;
         t.interfaceUptimeValid = snmp.interfaceStateUptimeValid;
         t.interfaceAliasValid = snmp.interfaceAliasValid;
@@ -121,6 +127,17 @@ static void netTask(void *arg) {
           t.interfaceAlias[sizeof(t.interfaceAlias) - 1] = '\0';
         } else {
           t.interfaceAlias[0] = '\0';
+        }
+
+        t.wanUptimeSec = 0;
+        t.wanUptimeValid = false;
+        if (g_routerApiConfigured && snmp.linkUp) {
+          KeeneticRciData rci;
+          if (keeneticRciFetchWanUptime(g_routerIP, g_routerApiLogin,
+                                        g_routerApiPassword, rci)) {
+            t.wanUptimeSec = rci.wanUptimeSec;
+            t.wanUptimeValid = rci.wanUptimeValid;
+          }
         }
 
         if (snmp.countersValid) {
@@ -186,6 +203,10 @@ static void netTask(void *arg) {
         }
       } else {
         g_snmpFailCount++;
+        t.systemUptimeSec = 0;
+        t.systemUptimeValid = false;
+        t.wanUptimeSec = 0;
+        t.wanUptimeValid = false;
         t.interfaceUptimeSec = 0;
         t.interfaceUptimeValid = false;
       }
@@ -245,6 +266,8 @@ static void netTask(void *arg) {
     if (!t.linkUp) {
       t.interfaceUptimeSec = 0;
       t.interfaceUptimeValid = false;
+      t.wanUptimeSec = 0;
+      t.wanUptimeValid = false;
     }
 
     if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -299,6 +322,14 @@ bool telemetryStart(const Settings &settings) {
   g_snmpCommunity[sizeof(g_snmpCommunity) - 1] = '\0';
   g_snmpVersion = (settings.snmpVersion == SnmpVersion::V1) ? 0 : 1;
   g_ifIndex = settings.ifIndex;
+  strncpy(g_routerApiLogin, settings.routerApiLogin.c_str(),
+          sizeof(g_routerApiLogin) - 1);
+  g_routerApiLogin[sizeof(g_routerApiLogin) - 1] = '\0';
+  strncpy(g_routerApiPassword, settings.routerApiPassword.c_str(),
+          sizeof(g_routerApiPassword) - 1);
+  g_routerApiPassword[sizeof(g_routerApiPassword) - 1] = '\0';
+  g_routerApiConfigured = (g_routerApiLogin[0] != '\0' &&
+                           g_routerApiPassword[0] != '\0');
 
   g_snmpReady      = false;
   g_haveSample1    = false;

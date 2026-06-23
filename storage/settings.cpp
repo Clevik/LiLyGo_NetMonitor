@@ -132,6 +132,7 @@ void normalizeSettings(Settings &settings) {
   settings.snmpCommunity.trim();
   settings.pingHost.trim();
   settings.ifName.trim();
+  settings.routerApiLogin.trim();
 }
 
 bool validateSettings(const Settings &settings, String *error) {
@@ -192,7 +193,7 @@ bool load(Settings &out) {
   }
 
   uint16_t schemaVersion = prefs.getUShort(KEY_SCHEMA_VERSION, 0);
-  if (schemaVersion != CONFIG_SCHEMA_VERSION) {
+  if (schemaVersion != 1 && schemaVersion != CONFIG_SCHEMA_VERSION) {
     prefs.end();
     Serial.printf("[Settings] incompatible schema version: stored=%u expected=%u\n",
                   schemaVersion, CONFIG_SCHEMA_VERSION);
@@ -211,6 +212,8 @@ bool load(Settings &out) {
   out.snmpCommunity  = prefs.getString("scom", "public");
   out.ifIndex        = prefs.getULong("ifidx", 0);
   out.ifName         = prefs.getString("ifnam", "");
+  out.routerApiLogin = prefs.getString("apilogin", "");
+  out.routerApiPassword = prefs.getString("apipass", "");
   out.pingHost       = prefs.getString("ping", "8.8.8.8");
   out.pingIntervalSec = prefs.getULong("pintv", 5);
   out.updateIntervalSec = prefs.getULong("intv", 5);
@@ -256,6 +259,8 @@ bool save(const Settings &in) {
   prefs.putString("scom",  stored.snmpCommunity);
   prefs.putULong("ifidx",  stored.ifIndex);
   prefs.putString("ifnam", stored.ifName);
+  prefs.putString("apilogin", stored.routerApiLogin);
+  prefs.putString("apipass", stored.routerApiPassword);
   prefs.putString("ping",  stored.pingHost);
   prefs.putULong("pintv",  stored.pingIntervalSec);
   prefs.putULong("intv",   stored.updateIntervalSec);

@@ -24,6 +24,8 @@ static void handleApiSettings(AsyncWebServerRequest *req) {
   doc["sver"]   = g_cfg->snmpVersion == SnmpVersion::V1 ? 1 : 2;
   doc["scom"]   = g_cfg->snmpCommunity;
   doc["ifidx"]  = g_cfg->ifIndex;
+  doc["apilogin"] = g_cfg->routerApiLogin;
+  doc["apipass"]  = g_cfg->routerApiPassword;
   doc["ping"]   = g_cfg->pingHost;
   doc["pintv"]  = g_cfg->pingIntervalSec;
   doc["intv"]   = g_cfg->updateIntervalSec;
@@ -57,6 +59,8 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
                            ? SnmpVersion::V1 : SnmpVersion::V2C;
   next.snmpCommunity   = doc["scom"]   | next.snmpCommunity;
   long ifIndex         = doc["ifidx"]  | static_cast<long>(next.ifIndex);
+  next.routerApiLogin  = doc["apilogin"] | next.routerApiLogin;
+  next.routerApiPassword = doc["apipass"] | next.routerApiPassword;
   next.pingHost        = doc["ping"]   | next.pingHost;
   long pingIntervalSec = doc["pintv"]  | static_cast<long>(next.pingIntervalSec);
   long updateIntervalSec = doc["intv"] | static_cast<long>(next.updateIntervalSec);

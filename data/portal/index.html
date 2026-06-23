@@ -46,6 +46,11 @@ small{color:#666;font-size:12px}
 <label>Interface Index</label>
 <input id='ifidx' type='number' min='1' step='1' placeholder='e.g. 4'>
 <small>Required WAN interface index. 0 is not supported.</small>
+<label>Keenetic API Login</label>
+<input id='apilogin' autocomplete='username' placeholder='Optional'>
+<label>Keenetic API Password</label>
+<input id='apipass' type='password' autocomplete='current-password' placeholder='Optional'>
+<small>Optional. Enables WAN connection uptime via Keenetic RCI/API.</small>
 </div>
 
 <div class='card'>
@@ -103,6 +108,8 @@ function doSave(){
     sver:+document.getElementById('sver').value,
     scom:document.getElementById('scom').value,
     ifidx:ifidx,
+    apilogin:document.getElementById('apilogin').value,
+    apipass:document.getElementById('apipass').value,
     ping:document.getElementById('ping').value,
     pintv:pintv,
     intv:intv,

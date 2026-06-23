@@ -60,6 +60,8 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
                              ? SnmpVersion::V1 : SnmpVersion::V2C;
   next.snmpCommunity     = doc["scom"]   | "public";
   long ifIndex           = doc["ifidx"]  | 0L;
+  next.routerApiLogin    = doc["apilogin"] | "";
+  next.routerApiPassword = doc["apipass"]  | "";
   next.pingHost          = doc["ping"]   | "8.8.8.8";
   long pingIntervalSec   = doc["pintv"]  | 5L;
   long updateIntervalSec = doc["intv"]   | 5L;

@@ -15,6 +15,7 @@ The device periodically polls your router via **SNMP** and pings an external
 server via **ICMP**, then displays real-time WAN status on the built-in screen:
 
 - Router IP address
+- Router system uptime and optional Keenetic WAN connection uptime
 - WAN link status — **UP** (green) / **DOWN** (red)
 - Ping latency to an external host (ms)
 - Incoming and outgoing traffic (Mbps)
@@ -27,6 +28,7 @@ with a captive portal. Connect from your phone or laptop and configure:
 
 - Wi-Fi network (SSID & password, with scan)
 - Router IP and SNMP parameters (port, version v1/v2c, community string, interface index)
+- Optional Keenetic API login/password for WAN connection uptime
 - Ping host and interval
 
 After saving, the device connects to your Wi-Fi and enters monitoring mode.
@@ -81,6 +83,7 @@ pio device monitor                 # serial monitor only
 по **ICMP**, отображая на экране актуальное состояние WAN-канала:
 
 - IP-адрес роутера
+- UPTIME системы роутера и опциональный UPTIME WAN-соединения Keenetic
 - Статус внешнего соединения — **UP** (зелёный) / **DOWN** (красный)
 - Задержка пинга до внешнего хоста (мс)
 - Входящий и исходящий трафик (Мбит/с)
@@ -94,6 +97,7 @@ pio device monitor                 # serial monitor only
 
 - Сеть Wi-Fi (SSID и пароль, со сканированием)
 - IP-адрес роутера и параметры SNMP (порт, версия v1/v2c, community-строка, индекс интерфейса)
+- Опциональные логин/пароль Keenetic API для UPTIME WAN-соединения
 - Хост и интервал пинга
 
 После сохранения устройство подключается к вашей Wi-Fi сети и переходит в

@@ -169,6 +169,8 @@ static void fillOutput(SnmpData &out, bool hc) {
   out.valid  = true;
   out.linkUp = (g_operStatus == 1);
   out.isHC   = hc;
+  out.systemUptimeValid = false;
+  out.systemUptimeSec = 0;
   out.interfaceStateUptimeValid = false;
   out.interfaceStateUptimeSec = 0;
   out.interfaceAliasValid = false;
@@ -187,6 +189,10 @@ static void fillOutput(SnmpData &out, bool hc) {
 
   bool ticksValid = (g_sysUpTimeTicks != TIMETICKS_SENTINEL &&
                      g_ifLastChangeTicks != TIMETICKS_SENTINEL);
+  if (g_sysUpTimeTicks != TIMETICKS_SENTINEL) {
+    out.systemUptimeSec = g_sysUpTimeTicks / 100U;
+    out.systemUptimeValid = true;
+  }
   if (out.linkUp && ticksValid) {
     uint32_t stateTicks = g_sysUpTimeTicks - g_ifLastChangeTicks;
     out.interfaceStateUptimeSec = stateTicks / 100U;
