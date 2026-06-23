@@ -145,10 +145,58 @@ static bool authenticate(IPAddress routerIp,
   return true;
 }
 
-bool keeneticRciFetchWanUptime(IPAddress routerIp,
-                               const char *login,
-                               const char *password,
-                               KeeneticRciData &out) {
+static bool fetchRciValue(IPAddress routerIp,
+                          const String &cookie,
+                          const char *path,
+                          String &body) {
+  String url = "http://" + routerIp.toString() + path;
+  WiFiClient client;
+  HTTPClient http;
+  http.setTimeout(RCI_HTTP_TIMEOUT_MS);
+  if (!http.begin(client, url)) {
+    return false;
+  }
+  http.addHeader("Cookie", cookie);
+  int code = http.GET();
+  body = http.getString();
+  http.end();
+
+  if (code != HTTP_CODE_OK) {
+    Serial.printf("[RCI] %s request failed: http=%d\n", path, code);
+    return false;
+  }
+  body.trim();
+  return body.length() > 0;
+}
+
+static bool parseJsonStringValue(const String &body, char *out, size_t outLen) {
+  JsonDocument doc;
+  if (deserializeJson(doc, body)) {
+    return false;
+  }
+  const char *value = doc.as<const char *>();
+  if (!value || value[0] == '\0') {
+    return false;
+  }
+  strncpy(out, value, outLen - 1);
+  out[outLen - 1] = '\0';
+  return true;
+}
+
+static bool parseUptimeValue(const String &body, uint32_t &uptimeSec) {
+  char *end = nullptr;
+  unsigned long uptime = strtoul(body.c_str(), &end, 10);
+  if (end == body.c_str()) {
+    return false;
+  }
+  uptimeSec = static_cast<uint32_t>(uptime);
+  return true;
+}
+
+bool keeneticRciFetchWanData(IPAddress routerIp,
+                             const char *login,
+                             const char *password,
+                             KeeneticRciData &out) {
   out = KeeneticRciData{};
   if (!hasText(login) || !hasText(password)) {
     return false;
@@ -159,36 +207,30 @@ bool keeneticRciFetchWanUptime(IPAddress routerIp,
     return false;
   }
 
-  String url = "http://" + routerIp.toString() + "/rci/show/interface/UsbLte0/uptime";
-  WiFiClient client;
-  HTTPClient http;
-  http.setTimeout(RCI_HTTP_TIMEOUT_MS);
-  if (!http.begin(client, url)) {
+  String body;
+  if (!fetchRciValue(routerIp, cookie,
+                     "/rci/show/interface/UsbLte0/connection-state",
+                     body)) {
     return false;
   }
-  http.addHeader("Cookie", cookie);
-  int code = http.GET();
-  String body = http.getString();
-  http.end();
-
-  if (code != HTTP_CODE_OK) {
-    Serial.printf("[RCI] uptime request failed: http=%d\n", code);
+  if (!parseJsonStringValue(body, out.wanConnectionState,
+                            sizeof(out.wanConnectionState))) {
+    Serial.println("[RCI] connection-state response is invalid");
     return false;
   }
+  out.wanConnectionStateValid = true;
 
-  body.trim();
-  if (body.length() == 0) {
-    return false;
+  if (fetchRciValue(routerIp, cookie,
+                    "/rci/show/interface/UsbLte0/uptime",
+                    body)) {
+    uint32_t uptimeSec = 0;
+    if (parseUptimeValue(body, uptimeSec)) {
+      out.wanUptimeSec = uptimeSec;
+      out.wanUptimeValid = true;
+    } else {
+      Serial.println("[RCI] uptime response is not a number");
+    }
   }
 
-  char *end = nullptr;
-  unsigned long uptime = strtoul(body.c_str(), &end, 10);
-  if (end == body.c_str()) {
-    Serial.println("[RCI] uptime response is not a number");
-    return false;
-  }
-
-  out.wanUptimeSec = static_cast<uint32_t>(uptime);
-  out.wanUptimeValid = true;
   return true;
 }

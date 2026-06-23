@@ -240,6 +240,65 @@ void uiObserveTelemetry(const Telemetry &t) {
   updateTrafficHistory(t);
 }
 
+static const char *wanConnectionStateText(WanConnectionState state) {
+  switch (state) {
+    case WanConnectionState::Disconnected:
+      return "DOWN";
+    case WanConnectionState::Initializing:
+      return "INIT";
+    case WanConnectionState::WaitingForNetwork:
+      return "WAIT";
+    case WanConnectionState::Requesting:
+    case WanConnectionState::Other:
+      return "CONN";
+    case WanConnectionState::Connected:
+      return "UP";
+    case WanConnectionState::Unknown:
+    default:
+      return "----";
+  }
+}
+
+static uint16_t wanConnectionStateRectColor(WanConnectionState state) {
+  switch (state) {
+    case WanConnectionState::Disconnected:
+      return CLR_STATUS_DN;
+    case WanConnectionState::Initializing:
+    case WanConnectionState::WaitingForNetwork:
+      return CLR_STATUS_UNC;
+    case WanConnectionState::Requesting:
+    case WanConnectionState::Other:
+      return CLR_STATUS_CONN;
+    case WanConnectionState::Connected:
+      return CLR_STATUS_UP;
+    case WanConnectionState::Unknown:
+    default:
+      return CLR_DIM;
+  }
+}
+
+static const char *statusText(const Telemetry &t) {
+  if (!t.dataValid) return "----";
+  if (t.wanConnectionStateValid) {
+    return wanConnectionStateText(t.wanConnectionState);
+  }
+  return t.linkUp ? "UP" : "DOWN";
+}
+
+static uint16_t statusColorRect(const Telemetry &t) {
+  if (!t.dataValid) return CLR_DIM;
+  if (t.wanConnectionStateValid) {
+    return wanConnectionStateRectColor(t.wanConnectionState);
+  }
+  if (t.linkUp) {
+    if (t.pingLoss && !t.linkUncertain) return CLR_STATUS_DN;
+    if (t.linkUncertain) return CLR_STATUS_UNC;
+    return CLR_STATUS_UP;
+  }
+  if (t.pingValid && !t.pingLoss) return CLR_STATUS_UNC;
+  return CLR_STATUS_DN;
+}
+
 #if defined(HW_AMOLED_143)
 constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
   return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
@@ -290,8 +349,29 @@ static void drawTextCenteredGlow(const char *text,
   drawTextCentered(text, centerX, centerY, size, color);
 }
 
+static uint16_t wanConnectionStateRoundColor(WanConnectionState state) {
+  switch (state) {
+    case WanConnectionState::Disconnected:
+      return CLR_ROUND_ALARM;
+    case WanConnectionState::Initializing:
+    case WanConnectionState::WaitingForNetwork:
+      return CLR_ROUND_WARN;
+    case WanConnectionState::Requesting:
+    case WanConnectionState::Other:
+      return CLR_STATUS_CONN;
+    case WanConnectionState::Connected:
+      return CLR_ROUND_DOWNLOAD;
+    case WanConnectionState::Unknown:
+    default:
+      return CLR_DIM;
+  }
+}
+
 static uint16_t statusColor(const Telemetry &t) {
   if (!t.dataValid) return CLR_DIM;
+  if (t.wanConnectionStateValid) {
+    return wanConnectionStateRoundColor(t.wanConnectionState);
+  }
   if (t.linkUp) {
     if (t.pingLoss && !t.linkUncertain) return CLR_ROUND_ALARM;
     if (t.linkUncertain) return CLR_ROUND_WARN;
@@ -299,11 +379,6 @@ static uint16_t statusColor(const Telemetry &t) {
   }
   if (t.pingValid && !t.pingLoss) return CLR_ROUND_WARN;
   return CLR_ROUND_ALARM;
-}
-
-static const char *statusText(const Telemetry &t) {
-  if (!t.dataValid) return "----";
-  return t.linkUp ? "UP" : "DOWN";
 }
 
 static void formatSpeedCompact(double bps, char *val, size_t vLen,
@@ -700,6 +775,49 @@ static void uiShowMainRound(const Telemetry &t) {
 }
 #endif  // defined(HW_AMOLED_143)
 
+static void drawRectGlobeIcon(int16_t cx, int16_t cy, uint16_t color) {
+  g_canvas->drawCircle(cx, cy, 8, color);
+  g_canvas->drawLine(cx - 7, cy, cx + 7, cy, color);
+  g_canvas->drawLine(cx, cy - 8, cx, cy + 8, color);
+  g_canvas->drawLine(cx - 4, cy - 6, cx - 2, cy + 6, color);
+  g_canvas->drawLine(cx + 4, cy - 6, cx + 2, cy + 6, color);
+}
+
+static void drawRectRouterIcon(int16_t cx, int16_t cy, uint16_t color) {
+  g_canvas->drawRect(cx - 8, cy - 4, 16, 9, color);
+  g_canvas->fillCircle(cx - 4, cy + 1, 1, color);
+  g_canvas->fillCircle(cx, cy + 1, 1, color);
+  g_canvas->drawLine(cx - 5, cy - 4, cx - 8, cy - 9, color);
+  g_canvas->drawLine(cx + 5, cy - 4, cx + 8, cy - 9, color);
+}
+
+static void drawRectPingValue(const char *value,
+                              int16_t y,
+                              uint16_t color,
+                              bool externalPing) {
+  constexpr uint8_t TEXT_SIZE = 3;
+  constexpr int16_t ICON_W = 18;
+  constexpr int16_t ICON_RIGHT_PAD = 8;
+  constexpr int16_t ICON_GAP = 8;
+
+  int16_t iconRight = SCREEN_W - ICON_RIGHT_PAD;
+  int16_t iconCenterX = iconRight - ICON_W / 2;
+  int16_t valueRight = iconRight - ICON_W - ICON_GAP;
+  int16_t valueX =
+      valueRight - static_cast<int16_t>(strlen(value) * 6U * TEXT_SIZE);
+
+  g_canvas->setTextSize(TEXT_SIZE);
+  g_canvas->setTextColor(color);
+  g_canvas->setCursor(valueX, y);
+  g_canvas->print(value);
+
+  if (externalPing) {
+    drawRectGlobeIcon(iconCenterX, y + 12, color);
+  } else {
+    drawRectRouterIcon(iconCenterX, y + 12, color);
+  }
+}
+
 static void uiShowMainRect(const Telemetry &t) {
   g_canvas->fillScreen(CLR_BG);
 
@@ -728,30 +846,17 @@ static void uiShowMainRect(const Telemetry &t) {
   g_canvas->print(routerInfo);
 
   constexpr uint8_t RECT_STATUS_TEXT_SIZE = 3;
-  constexpr int16_t RECT_STATUS_Y = ZONE_A_Y + 36;
+  constexpr int16_t RECT_STATUS_Y = ZONE_A_Y + 44;
   const char *rectStatusText = "----";
   uint16_t rectStatusColor = CLR_DIM;
   int16_t rectStatusX = 255;
 
   if (t.dataValid) {
-    if (t.linkUp) {
-      if (t.pingLoss && !t.linkUncertain) {
-        rectStatusColor = CLR_STATUS_DN;
-      } else if (t.linkUncertain) {
-        rectStatusColor = CLR_STATUS_UNC;
-      } else {
-        rectStatusColor = CLR_STATUS_UP;
-      }
+    rectStatusColor = statusColorRect(t);
+    rectStatusText = statusText(t);
+    if (strcmp(rectStatusText, "UP") == 0) {
       rectStatusText = " UP ";
       rectStatusX = 275;
-    } else {
-      if (t.pingValid && !t.pingLoss) {
-        rectStatusColor = CLR_STATUS_UNC;
-      } else {
-        rectStatusColor = CLR_STATUS_DN;
-      }
-      rectStatusText = "DOWN";
-      rectStatusX = 255;
     }
   }
 
@@ -781,45 +886,38 @@ static void uiShowMainRect(const Telemetry &t) {
     uint16_t pingColor  = CLR_PING;
 
     if (!t.dataValid) {
-      static const char *frames[] = {"_- ms", "-_ ms", "-- ms"};
+      static const char *frames[] = {"_-", "-_", "--"};
       pingStr  = frames[(millis() / 500) % 3];
       pingColor = CLR_DIM;
     } else if (t.pingLoss) {
       pingStr  = "loss";
       pingColor = CLR_STATUS_DN;
     } else if (t.pingMs == 0) {
-      pingStr  = "-- ms";
+      pingStr  = "--";
     } else {
-      snprintf(g_fmtBuf, sizeof(g_fmtBuf), "%u ms", t.pingMs);
+      snprintf(g_fmtBuf, sizeof(g_fmtBuf), "%u", t.pingMs);
       pingStr = g_fmtBuf;
     }
 
-    g_canvas->setTextSize(3);
-    g_canvas->setTextColor(pingColor);
-    int len = strlen(pingStr);
-    int16_t px = SCREEN_W - len * 18 - 8;
-    g_canvas->setCursor(px, ZONE_A_Y + 4);
-    g_canvas->print(pingStr);
+    drawRectPingValue(pingStr, ZONE_A_Y + 4, pingColor, true);
   }
 
   // Нижний: пинг до роутера
   {
-    g_canvas->setTextSize(3);
-    g_canvas->setTextColor(CLR_PING);
     const char *rStr;
     char rBuf[16];
+    uint16_t routerPingColor = CLR_PING;
     if (!t.dataValid) {
-      rStr = "-- ms";
+      rStr = "--";
+      routerPingColor = CLR_DIM;
     } else if (t.routerPingValid) {
-      snprintf(rBuf, sizeof(rBuf), "%u ms", t.routerPingMs);
+      snprintf(rBuf, sizeof(rBuf), "%u", t.routerPingMs);
       rStr = rBuf;
     } else {
-      rStr = "-- ms";
+      rStr = "--";
+      routerPingColor = CLR_DIM;
     }
-    int len = strlen(rStr);
-    int16_t px = SCREEN_W - len * 18 - 8;
-    g_canvas->setCursor(px, ZONE_A_Y + 44);
-    g_canvas->print(rStr);
+    drawRectPingValue(rStr, ZONE_A_Y + 44, routerPingColor, false);
   }
 
   // --- Зона B: трафик (одна строка) ---

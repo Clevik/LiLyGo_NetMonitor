@@ -70,6 +70,32 @@ static bool intervalDue(uint32_t now, uint32_t lastMs, uint32_t intervalMs) {
   return lastMs == 0 || now - lastMs >= intervalMs;
 }
 
+static WanConnectionState parseWanConnectionState(const char *state) {
+  if (!state || state[0] == '\0') {
+    return WanConnectionState::Unknown;
+  }
+  if (strcmp(state, "Disconnected") == 0) {
+    return WanConnectionState::Disconnected;
+  }
+  if (strcmp(state, "Initializing") == 0) {
+    return WanConnectionState::Initializing;
+  }
+  if (strcmp(state, "Waiting for network") == 0) {
+    return WanConnectionState::WaitingForNetwork;
+  }
+  if (strcmp(state, "Requesting") == 0 || strcmp(state, "Connecting") == 0) {
+    return WanConnectionState::Requesting;
+  }
+  if (strcmp(state, "Connected") == 0) {
+    return WanConnectionState::Connected;
+  }
+  return WanConnectionState::Other;
+}
+
+static bool wanConnectionStateIsUp(WanConnectionState state) {
+  return state == WanConnectionState::Connected;
+}
+
 static void signalTaskStopped() {
   snmpCleanup();
   g_snmpReady = false;
@@ -131,12 +157,20 @@ static void netTask(void *arg) {
 
         t.wanUptimeSec = 0;
         t.wanUptimeValid = false;
-        if (g_routerApiConfigured && snmp.linkUp) {
+        t.wanConnectionState = WanConnectionState::Unknown;
+        t.wanConnectionStateValid = false;
+        if (g_routerApiConfigured) {
           KeeneticRciData rci;
-          if (keeneticRciFetchWanUptime(g_routerIP, g_routerApiLogin,
-                                        g_routerApiPassword, rci)) {
-            t.wanUptimeSec = rci.wanUptimeSec;
-            t.wanUptimeValid = rci.wanUptimeValid;
+          if (keeneticRciFetchWanData(g_routerIP, g_routerApiLogin,
+                                      g_routerApiPassword, rci)) {
+            t.wanConnectionState =
+                parseWanConnectionState(rci.wanConnectionState);
+            t.wanConnectionStateValid = rci.wanConnectionStateValid;
+            if (t.wanConnectionState == WanConnectionState::Connected &&
+                rci.wanUptimeValid) {
+              t.wanUptimeSec = rci.wanUptimeSec;
+              t.wanUptimeValid = true;
+            }
           }
         }
 
@@ -209,6 +243,8 @@ static void netTask(void *arg) {
         t.wanUptimeValid = false;
         t.interfaceUptimeSec = 0;
         t.interfaceUptimeValid = false;
+        t.wanConnectionState = WanConnectionState::Unknown;
+        t.wanConnectionStateValid = false;
       }
       changed = true;
     }
@@ -255,7 +291,9 @@ static void netTask(void *arg) {
     t.lastUpdateMs = millis();
     t.linkUncertain = false;
 
-    if (g_snmpFailCount == 0) {
+    if (t.wanConnectionStateValid) {
+      t.linkUp = wanConnectionStateIsUp(t.wanConnectionState);
+    } else if (g_snmpFailCount == 0) {
       // статус от SNMP — уже записан
     } else if (g_snmpFailCount == 1) {
       t.linkUp = g_tel.linkUp;

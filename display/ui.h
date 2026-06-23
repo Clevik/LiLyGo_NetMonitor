@@ -2,6 +2,16 @@
 
 #include <Arduino.h>
 
+enum class WanConnectionState : uint8_t {
+  Unknown,
+  Disconnected,
+  Initializing,
+  WaitingForNetwork,
+  Requesting,
+  Connected,
+  Other,
+};
+
 struct Telemetry {
   bool     linkUp         = false;
   bool     linkUncertain  = false;
@@ -16,6 +26,8 @@ struct Telemetry {
   bool     systemUptimeValid = false;
   uint32_t wanUptimeSec = 0;
   bool     wanUptimeValid = false;
+  WanConnectionState wanConnectionState = WanConnectionState::Unknown;
+  bool     wanConnectionStateValid = false;
   uint32_t interfaceUptimeSec = 0;
   bool     interfaceUptimeValid = false;
   char     interfaceAlias[32] = {};

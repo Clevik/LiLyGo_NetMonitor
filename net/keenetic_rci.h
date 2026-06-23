@@ -6,9 +6,11 @@
 struct KeeneticRciData {
   uint32_t wanUptimeSec = 0;
   bool     wanUptimeValid = false;
+  char     wanConnectionState[32] = {};
+  bool     wanConnectionStateValid = false;
 };
 
-bool keeneticRciFetchWanUptime(IPAddress routerIp,
-                               const char *login,
-                               const char *password,
-                               KeeneticRciData &out);
+bool keeneticRciFetchWanData(IPAddress routerIp,
+                             const char *login,
+                             const char *password,
+                             KeeneticRciData &out);
