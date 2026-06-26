@@ -382,8 +382,10 @@ constexpr int16_t GLOBE_PDF_Y = 255;
 constexpr int16_t PING_ICON_PDF_Y = 275;
 constexpr int16_t PING_VALUE_PDF_Y = 210;
 
-constexpr int16_t ROUTER_TITLE_Y = 14;
-constexpr int16_t ROUTER_VALUE_PDF_Y = 425;
+constexpr int16_t ROUTER_TITLE_Y = 30;
+constexpr uint8_t ROUTER_TITLE_TEXT_SIZE = 2;
+constexpr uint8_t ROUTER_VALUE_TEXT_SIZE = 3;
+constexpr int16_t ROUTER_TITLE_VALUE_GAP = 10;
 constexpr int16_t STATUS_PDF_Y = 360;
 
 constexpr int16_t SPEED_ARROW_PDF_Y = 120;
@@ -409,7 +411,16 @@ constexpr int16_t PING_VALUE_Y_OFFSET = -7;
 constexpr int16_t PING_UNIT_Y_OFFSET = 31;
 }  // namespace RoundLayout
 
-static int16_t centerYFromPdf(int16_t pdfY) {
+struct RoundDebugZone {
+  const char *label;
+  int16_t x;
+  int16_t y;
+  int16_t w;
+  int16_t h;
+  uint16_t color;
+};
+
+static constexpr int16_t centerYFromPdf(int16_t pdfY) {
   return static_cast<int16_t>(SCREEN_H) - pdfY;
 }
 
@@ -419,6 +430,14 @@ static int16_t textPixelWidth(const char *text, uint8_t size) {
 
 static int16_t textPixelHeight(uint8_t size) {
   return static_cast<int16_t>(8U * size);
+}
+
+static int16_t routerValueCenterY() {
+  return static_cast<int16_t>(
+      RoundLayout::ROUTER_TITLE_Y +
+      textPixelHeight(RoundLayout::ROUTER_TITLE_TEXT_SIZE) / 2 +
+      RoundLayout::ROUTER_TITLE_VALUE_GAP +
+      textPixelHeight(RoundLayout::ROUTER_VALUE_TEXT_SIZE) / 2);
 }
 
 static void drawTextCentered(const char *text,
@@ -445,6 +464,54 @@ static void drawTextCenteredGlow(const char *text,
   drawTextCentered(text, centerX, centerY - 1, size, glow);
   drawTextCentered(text, centerX, centerY + 1, size, glow);
   drawTextCentered(text, centerX, centerY, size, color);
+}
+
+static void drawRoundDebugZone(const RoundDebugZone &zone) {
+  g_canvas->drawRect(zone.x, zone.y, zone.w, zone.h, zone.color);
+  if (zone.w > 4 && zone.h > 4) {
+    g_canvas->drawRect(zone.x + 1, zone.y + 1, zone.w - 2, zone.h - 2,
+                       zone.color);
+  }
+
+  g_canvas->setTextSize(1);
+  g_canvas->setTextColor(zone.color, CLR_BG);
+  g_canvas->setCursor(zone.x + 3, zone.y + 3);
+  g_canvas->print(zone.label);
+}
+
+static void drawRoundDebugZones() {
+  static constexpr uint16_t CLR_DEBUG_TOP = rgb565(0xFF, 0xE0, 0x00);
+  static constexpr uint16_t CLR_DEBUG_LEFT = rgb565(0x00, 0xFF, 0x80);
+  static constexpr uint16_t CLR_DEBUG_RIGHT = rgb565(0x40, 0xB0, 0xFF);
+  static constexpr uint16_t CLR_DEBUG_CENTER = rgb565(0xFF, 0x40, 0xFF);
+  static constexpr uint16_t CLR_DEBUG_BOTTOM = rgb565(0xFF, 0x80, 0x00);
+
+  static constexpr RoundDebugZone zones[] = {
+      {"SCREEN", 0, 0, SCREEN_W, SCREEN_H, CLR_DIM},
+      {"PING_L", 40, 155, 150, 142, CLR_DEBUG_LEFT},
+      {"PING_R", 276, 155, 150, 142, CLR_DEBUG_RIGHT},
+      {"GLOBE", RoundLayout::CENTER_X - RoundLayout::GLOBE_RADIUS,
+       centerYFromPdf(RoundLayout::GLOBE_PDF_Y) - RoundLayout::GLOBE_RADIUS,
+       RoundLayout::GLOBE_RADIUS * 2, RoundLayout::GLOBE_RADIUS * 2,
+       CLR_DEBUG_CENTER},
+      {"SPEED_L", 54, 304, 174, 92, CLR_DEBUG_LEFT},
+      {"SPEED_R", 238, 304, 174, 92, CLR_DEBUG_RIGHT},
+      {"GRAPH_IN", RoundLayout::LINE_GRAPH_X,
+       centerYFromPdf(RoundLayout::LINE_GRAPH_IN_PDF_Y) -
+           RoundLayout::LINE_GRAPH_IN_H,
+       RoundLayout::LINE_GRAPH_W, RoundLayout::LINE_GRAPH_IN_H,
+       CLR_DEBUG_BOTTOM},
+      {"GRAPH_OUT", RoundLayout::LINE_GRAPH_X,
+       centerYFromPdf(RoundLayout::LINE_GRAPH_OUT_PDF_Y) -
+           RoundLayout::LINE_GRAPH_OUT_H,
+       RoundLayout::LINE_GRAPH_W, RoundLayout::LINE_GRAPH_OUT_H,
+       CLR_DEBUG_BOTTOM},
+      {"DEVICE", 84, 416, 298, 48, CLR_DEBUG_BOTTOM},
+  };
+
+  for (const RoundDebugZone &zone : zones) {
+    drawRoundDebugZone(zone);
+  }
 }
 
 static uint16_t wanConnectionStateRoundColor(WanConnectionState state) {
@@ -856,14 +923,15 @@ static void uiShowMainRound(const Telemetry &t) {
     char value[32];
     formatRouterInfo(t, title, sizeof(title), value, sizeof(value));
     drawTextCentered(title, RoundLayout::CENTER_X,
-                     RoundLayout::ROUTER_TITLE_Y, 2, CLR_DIM);
+                     RoundLayout::ROUTER_TITLE_Y,
+                     RoundLayout::ROUTER_TITLE_TEXT_SIZE, CLR_DIM);
     drawTextCentered(value, RoundLayout::CENTER_X,
-                     centerYFromPdf(RoundLayout::ROUTER_VALUE_PDF_Y),
-                     4, CLR_TEXT);
+                     routerValueCenterY(),
+                     RoundLayout::ROUTER_VALUE_TEXT_SIZE, CLR_TEXT);
   }
   drawTextCenteredGlow(statusText(t), RoundLayout::CENTER_X,
                        centerYFromPdf(RoundLayout::STATUS_PDF_Y),
-                       9, statusColor(t), statusColor(t));
+                       5, statusColor(t), statusColor(t));
 
   bool routerValid = t.dataValid && t.routerPingValid;
   drawPingBlock(RoundLayout::LEFT_METRIC_X,
@@ -890,6 +958,8 @@ static void uiShowMainRound(const Telemetry &t) {
                    RoundLayout::DEVICE_TITLE_Y, 2, CLR_TEXT);
   drawTextCentered(ip.c_str(), RoundLayout::CENTER_X,
                    RoundLayout::DEVICE_IP_Y, 3, CLR_TEXT);
+
+  drawRoundDebugZones();
 
   flush();
 }
