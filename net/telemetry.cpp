@@ -20,6 +20,7 @@ static Telemetry         g_tel;
 static char     g_pingHost[64];
 static uint32_t g_pingIntervalMs = 5000;
 static uint32_t g_snmpIntervalMs = 5000;
+static uint32_t g_rciIntervalMs = DEFAULT_RCI_INTERVAL_SEC * 1000UL;
 
 static constexpr uint32_t ROUTER_PING_INTERVAL_MS = 5000;
 static constexpr uint32_t NET_TASK_TICK_MS = 100;
@@ -98,6 +99,7 @@ static bool wanConnectionStateIsUp(WanConnectionState state) {
 
 static void signalTaskStopped() {
   snmpCleanup();
+  keeneticRciResetSession();
   g_snmpReady = false;
   g_running = false;
   setTaskHandle(nullptr);
@@ -109,10 +111,13 @@ static void signalTaskStopped() {
 
 static void netTask(void *arg) {
   Serial.printf("[NetTask] started on core %d\n", xPortGetCoreID());
-  Serial.printf("[NetTask] intervals: snmp=%u ms ping=%u ms router=%u ms\n",
-                g_snmpIntervalMs, g_pingIntervalMs, ROUTER_PING_INTERVAL_MS);
+  Serial.printf(
+      "[NetTask] intervals: snmp=%u ms rci=%u ms ping=%u ms router=%u ms\n",
+      g_snmpIntervalMs, g_rciIntervalMs, g_pingIntervalMs,
+      ROUTER_PING_INTERVAL_MS);
 
   uint32_t lastSnmpMs = 0;
+  uint32_t lastRciMs = 0;
   uint32_t lastRouterPingMs = 0;
   uint32_t lastExternalPingMs = 0;
 
@@ -129,6 +134,7 @@ static void netTask(void *arg) {
                g_snmpVersion, g_ifIndex);
       g_snmpReady = true;
       lastSnmpMs = 0;
+      lastRciMs = 0;
       lastRouterPingMs = 0;
       lastExternalPingMs = 0;
     }
@@ -153,25 +159,6 @@ static void netTask(void *arg) {
           t.interfaceAlias[sizeof(t.interfaceAlias) - 1] = '\0';
         } else {
           t.interfaceAlias[0] = '\0';
-        }
-
-        t.wanUptimeSec = 0;
-        t.wanUptimeValid = false;
-        t.wanConnectionState = WanConnectionState::Unknown;
-        t.wanConnectionStateValid = false;
-        if (g_routerApiConfigured) {
-          KeeneticRciData rci;
-          if (keeneticRciFetchWanData(g_routerIP, g_routerApiLogin,
-                                      g_routerApiPassword, rci)) {
-            t.wanConnectionState =
-                parseWanConnectionState(rci.wanConnectionState);
-            t.wanConnectionStateValid = rci.wanConnectionStateValid;
-            if (t.wanConnectionState == WanConnectionState::Connected &&
-                rci.wanUptimeValid) {
-              t.wanUptimeSec = rci.wanUptimeSec;
-              t.wanUptimeValid = true;
-            }
-          }
         }
 
         if (snmp.countersValid) {
@@ -239,14 +226,33 @@ static void netTask(void *arg) {
         g_snmpFailCount++;
         t.systemUptimeSec = 0;
         t.systemUptimeValid = false;
-        t.wanUptimeSec = 0;
-        t.wanUptimeValid = false;
         t.interfaceUptimeSec = 0;
         t.interfaceUptimeValid = false;
-        t.wanConnectionState = WanConnectionState::Unknown;
-        t.wanConnectionStateValid = false;
       }
       changed = true;
+    }
+
+    if (!g_running) break;
+
+    now = millis();
+    if (g_routerApiConfigured &&
+        intervalDue(now, lastRciMs, g_rciIntervalMs)) {
+      lastRciMs = now;
+      KeeneticRciData rci;
+      if (keeneticRciFetchWanData(g_routerIP, g_routerApiLogin,
+                                  g_routerApiPassword, rci)) {
+        t.wanConnectionState =
+            parseWanConnectionState(rci.wanConnectionState);
+        t.wanConnectionStateValid = rci.wanConnectionStateValid;
+        t.wanUptimeSec = 0;
+        t.wanUptimeValid = false;
+        if (t.wanConnectionState == WanConnectionState::Connected &&
+            rci.wanUptimeValid) {
+          t.wanUptimeSec = rci.wanUptimeSec;
+          t.wanUptimeValid = true;
+        }
+        changed = true;
+      }
     }
 
     if (!g_running) break;
@@ -349,6 +355,8 @@ bool telemetryStart(const Settings &settings) {
   g_pingHost[sizeof(g_pingHost) - 1] = '\0';
   g_pingIntervalMs = clampSettingsIntervalSec(static_cast<long>(settings.pingIntervalSec)) * 1000UL;
   g_snmpIntervalMs = clampSettingsIntervalSec(static_cast<long>(settings.updateIntervalSec)) * 1000UL;
+  g_rciIntervalMs = clampSettingsIntervalSec(
+      static_cast<long>(settings.rciIntervalSec)) * 1000UL;
 
   if (!g_routerIP.fromString(settings.routerHost)) {
     Serial.printf("[NetTask] start failed: routerHost is not a valid IPv4 address: %s\n",
@@ -368,6 +376,7 @@ bool telemetryStart(const Settings &settings) {
   g_routerApiPassword[sizeof(g_routerApiPassword) - 1] = '\0';
   g_routerApiConfigured = (g_routerApiLogin[0] != '\0' &&
                            g_routerApiPassword[0] != '\0');
+  keeneticRciResetSession();
 
   g_snmpReady      = false;
   g_haveSample1    = false;
@@ -409,6 +418,7 @@ bool telemetryStop(uint32_t timeoutMs) {
   if (!task) {
     g_running = false;
     g_snmpReady = false;
+    keeneticRciResetSession();
     return true;
   }
 

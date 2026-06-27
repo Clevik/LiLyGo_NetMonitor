@@ -62,6 +62,7 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   long ifIndex           = doc["ifidx"]  | 0L;
   next.routerApiLogin    = doc["apilogin"] | "";
   next.routerApiPassword = doc["apipass"]  | "";
+  long rciIntervalSec    = doc["rciintv"] | static_cast<long>(DEFAULT_RCI_INTERVAL_SEC);
   next.pingHost          = doc["ping"]   | "8.8.8.8";
   long pingIntervalSec   = doc["pintv"]  | 5L;
   long updateIntervalSec = doc["intv"]   | 5L;
@@ -69,6 +70,7 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   next.snmpPort          = (snmpPort >= 1 && snmpPort <= 65535)
                              ? static_cast<uint16_t>(snmpPort) : 0;
   next.ifIndex           = ifIndex > 0 ? static_cast<uint32_t>(ifIndex) : 0;
+  next.rciIntervalSec    = static_cast<uint32_t>(rciIntervalSec);
   next.pingIntervalSec   = static_cast<uint32_t>(pingIntervalSec);
   next.updateIntervalSec = static_cast<uint32_t>(updateIntervalSec);
   next.wifiRetryDelaySec = static_cast<uint32_t>(wifiRetryDelaySec);

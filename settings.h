@@ -7,11 +7,12 @@
 #include <Arduino.h>
 
 // Версия схемы конфигурации (для будущих миграций).
-constexpr uint16_t CONFIG_SCHEMA_VERSION = 2;
+constexpr uint16_t CONFIG_SCHEMA_VERSION = 3;
 constexpr uint32_t SETTINGS_INTERVAL_MIN_SEC = 1;
 constexpr uint32_t SETTINGS_INTERVAL_MAX_SEC = 3600;
 constexpr uint32_t SETTINGS_WIFI_RETRY_MIN_SEC = 1;
 constexpr uint32_t SETTINGS_WIFI_RETRY_MAX_SEC = 3600;
+constexpr uint32_t DEFAULT_RCI_INTERVAL_SEC = 15;
 
 inline uint32_t clampSettingsIntervalSec(long value) {
   if (value < static_cast<long>(SETTINGS_INTERVAL_MIN_SEC)) {
@@ -45,6 +46,7 @@ struct Settings {
   String      ifName;              // имя интерфейса (опционально)
   String      routerApiLogin;      // логин Keenetic RCI/API для WAN uptime
   String      routerApiPassword;   // пароль Keenetic RCI/API для WAN uptime
+  uint32_t    rciIntervalSec = DEFAULT_RCI_INTERVAL_SEC;
 
   // --- Пинг ---
   String      pingHost       = "8.8.8.8";

@@ -45,7 +45,6 @@ void uiShowReconnectWait(const char *ssid, uint32_t remainSec);
 void uiSetRouterIp(const char *ip);
 void uiObserveTelemetry(const Telemetry &t);
 void uiShowMain(const Telemetry &t);
-void uiUpdateMain(const Telemetry &t);
 void uiCycleBrightness();
 bool uiDisplayEnabled();
 bool uiConsumeRedrawRequest();

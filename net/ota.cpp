@@ -26,6 +26,7 @@ static void handleApiSettings(AsyncWebServerRequest *req) {
   doc["ifidx"]  = g_cfg->ifIndex;
   doc["apilogin"] = g_cfg->routerApiLogin;
   doc["apipass"]  = g_cfg->routerApiPassword;
+  doc["rciintv"] = g_cfg->rciIntervalSec;
   doc["ping"]   = g_cfg->pingHost;
   doc["pintv"]  = g_cfg->pingIntervalSec;
   doc["intv"]   = g_cfg->updateIntervalSec;
@@ -61,6 +62,7 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   long ifIndex         = doc["ifidx"]  | static_cast<long>(next.ifIndex);
   next.routerApiLogin  = doc["apilogin"] | next.routerApiLogin;
   next.routerApiPassword = doc["apipass"] | next.routerApiPassword;
+  long rciIntervalSec = doc["rciintv"] | static_cast<long>(next.rciIntervalSec);
   next.pingHost        = doc["ping"]   | next.pingHost;
   long pingIntervalSec = doc["pintv"]  | static_cast<long>(next.pingIntervalSec);
   long updateIntervalSec = doc["intv"] | static_cast<long>(next.updateIntervalSec);
@@ -68,6 +70,7 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   next.snmpPort        = (snmpPort >= 1 && snmpPort <= 65535)
                            ? static_cast<uint16_t>(snmpPort) : 0;
   next.ifIndex         = ifIndex > 0 ? static_cast<uint32_t>(ifIndex) : 0;
+  next.rciIntervalSec  = static_cast<uint32_t>(rciIntervalSec);
   next.pingIntervalSec = static_cast<uint32_t>(pingIntervalSec);
   next.updateIntervalSec = static_cast<uint32_t>(updateIntervalSec);
   next.wifiRetryDelaySec = static_cast<uint32_t>(wifiRetryDelaySec);

@@ -230,7 +230,7 @@ void loop() {
       if (uiFrameMs > 0 &&
           (redrawRequested || g_lastUiMs == 0 || now - g_lastUiMs >= uiFrameMs)) {
         g_lastUiMs = now;
-        uiUpdateMain(g_telemetry);
+        uiShowMain(g_telemetry);
       }
       break;
     }

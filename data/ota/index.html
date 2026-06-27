@@ -39,6 +39,9 @@ small{color:#666;font-size:12px}
 <label>Keenetic API Password</label>
 <input id='apipass' type='password' autocomplete='current-password' placeholder='Optional'>
 <small>Optional. Enables WAN connection uptime via Keenetic RCI/API.</small>
+<label>RCI Poll Interval (sec)</label>
+<input id='rciintv' type='number' min='1' max='3600' step='1' value='15'>
+<small>How often to request WAN state and uptime from Keenetic RCI.</small>
 </div>
 <div class='card'>
 <label>Ping Host</label>
@@ -65,6 +68,7 @@ fetch('/api/settings').then(r=>r.json()).then(d=>{
   document.getElementById('ifidx').value=d.ifidx||'';
   document.getElementById('apilogin').value=d.apilogin||'';
   document.getElementById('apipass').value=d.apipass||'';
+  document.getElementById('rciintv').value=d.rciintv||15;
   document.getElementById('ping').value=d.ping||'';
   document.getElementById('pintv').value=d.pintv||5;
   document.getElementById('intv').value=d.intv||5;
@@ -77,10 +81,12 @@ function doSave(){
   var sport=+document.getElementById('sport').value;
   var pintv=+document.getElementById('pintv').value;
   var intv=+document.getElementById('intv').value;
+  var rciintv=+document.getElementById('rciintv').value;
   var wretry=+document.getElementById('wretry').value;
   if(!ifidx||ifidx<1||Math.floor(ifidx)!==ifidx){alert('Enter Interface Index greater than 0');return;}
   if(!validPort(sport)){alert('SNMP Port must be 1..65535');return;}
   if(!validInterval(pintv)||!validInterval(intv)){alert('Ping and SNMP intervals must be 1..3600 sec');return;}
+  if(!validInterval(rciintv)){alert('RCI Poll Interval must be 1..3600 sec');return;}
   if(!validInterval(wretry)){alert('Wi-Fi Retry Delay must be 1..3600 sec');return;}
   var d={
     router:document.getElementById('router').value,
@@ -90,6 +96,7 @@ function doSave(){
     ifidx:ifidx,
     apilogin:document.getElementById('apilogin').value,
     apipass:document.getElementById('apipass').value,
+    rciintv:rciintv,
     ping:document.getElementById('ping').value,
     pintv:pintv,
     intv:intv,

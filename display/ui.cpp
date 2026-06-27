@@ -11,7 +11,6 @@
   #include "globe_frames.h"
 #endif
 #include "ui.h"
-#include "logging.h"
 
 static Arduino_DataBus *g_bus    = nullptr;
 static Arduino_GFX     *g_disp   = nullptr;
@@ -38,7 +37,7 @@ static uint16_t g_histHead  = 0;
 static uint32_t g_lastHistMs = 0;
 
 static void logMemoryState(const char *stage) {
-  LOG_D(
+  Serial.printf(
     "[UI] memory %s: heap free=%u largest=%u min=%u; psram found=%s size=%u free=%u largest=%u min=%u\n",
     stage,
     static_cast<unsigned>(ESP.getFreeHeap()),
@@ -49,7 +48,7 @@ static void logMemoryState(const char *stage) {
     static_cast<unsigned>(ESP.getFreePsram()),
     static_cast<unsigned>(ESP.getMaxAllocPsram()),
     static_cast<unsigned>(ESP.getMinFreePsram()));
-  LOG_D(
+  Serial.printf(
     "[UI] heap caps %s: internal free=%u largest=%u; spiram free=%u largest=%u\n",
     stage,
     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
@@ -60,17 +59,17 @@ static void logMemoryState(const char *stage) {
 
 static void logCanvasFramebuffer(const char *stage) {
   if (!g_canvas) {
-    LOG_D("[UI] canvas %s: object is null\n", stage);
+    Serial.printf("[UI] canvas %s: object is null\n", stage);
     return;
   }
 
   uint16_t *fb = g_canvas->getFramebuffer();
   if (!fb) {
-    LOG_D("[UI] canvas %s: framebuffer is null\n", stage);
+    Serial.printf("[UI] canvas %s: framebuffer is null\n", stage);
     return;
   }
 
-  LOG_D(
+  Serial.printf(
     "[UI] canvas %s: framebuffer=%p allocated=%u bytes location=%s\n",
     stage,
     fb,
@@ -86,7 +85,7 @@ static void pushHistory(float inBps, float outBps) {
 }
 
 bool uiInit() {
-  LOG_D("[UI] canvas need: %ux%u RGB565 = %u bytes\n",
+  Serial.printf("[UI] canvas need: %ux%u RGB565 = %u bytes\n",
         static_cast<unsigned>(SCREEN_W),
         static_cast<unsigned>(SCREEN_H),
         static_cast<unsigned>(CANVAS_BUFFER_BYTES));
@@ -110,7 +109,7 @@ bool uiInit() {
 
   g_canvas = new Arduino_Canvas(SCREEN_W, SCREEN_H, g_disp);
   if (!g_canvas->begin()) {
-    LOG_E("[UI] canvas->begin() failed: need %u bytes, psram found=%s\n",
+    Serial.printf("[UI] canvas->begin() failed: need %u bytes, psram found=%s\n",
           static_cast<unsigned>(CANVAS_BUFFER_BYTES),
           psramFound() ? "yes" : "no");
     logCanvasFramebuffer("after failed begin");
@@ -1274,5 +1273,5 @@ void uiCycleBrightness() {
   if (!wasEnabled && val > 0) {
     g_redrawRequested = true;
   }
-  LOG_I("[UI] brightness -> %d (0x%02X)\n", g_brightnessIdx, val);
+  Serial.printf("[UI] brightness -> %d (0x%02X)\n", g_brightnessIdx, val);
 }

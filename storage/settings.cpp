@@ -172,6 +172,10 @@ bool validateSettings(const Settings &settings, String *error) {
       settings.updateIntervalSec > SETTINGS_INTERVAL_MAX_SEC) {
     return reject(error, "SNMP Poll Interval must be 1..3600 sec");
   }
+  if (settings.rciIntervalSec < SETTINGS_INTERVAL_MIN_SEC ||
+      settings.rciIntervalSec > SETTINGS_INTERVAL_MAX_SEC) {
+    return reject(error, "RCI Poll Interval must be 1..3600 sec");
+  }
   if (settings.wifiRetryDelaySec < SETTINGS_WIFI_RETRY_MIN_SEC ||
       settings.wifiRetryDelaySec > SETTINGS_WIFI_RETRY_MAX_SEC) {
     return reject(error, "Wi-Fi Retry Delay must be 1..3600 sec");
@@ -193,7 +197,7 @@ bool load(Settings &out) {
   }
 
   uint16_t schemaVersion = prefs.getUShort(KEY_SCHEMA_VERSION, 0);
-  if (schemaVersion != 1 && schemaVersion != CONFIG_SCHEMA_VERSION) {
+  if (schemaVersion < 1 || schemaVersion > CONFIG_SCHEMA_VERSION) {
     prefs.end();
     Serial.printf("[Settings] incompatible schema version: stored=%u expected=%u\n",
                   schemaVersion, CONFIG_SCHEMA_VERSION);
@@ -214,6 +218,7 @@ bool load(Settings &out) {
   out.ifName         = prefs.getString("ifnam", "");
   out.routerApiLogin = prefs.getString("apilogin", "");
   out.routerApiPassword = prefs.getString("apipass", "");
+  out.rciIntervalSec = prefs.getULong("rciintv", DEFAULT_RCI_INTERVAL_SEC);
   out.pingHost       = prefs.getString("ping", "8.8.8.8");
   out.pingIntervalSec = prefs.getULong("pintv", 5);
   out.updateIntervalSec = prefs.getULong("intv", 5);
@@ -261,6 +266,7 @@ bool save(const Settings &in) {
   prefs.putString("ifnam", stored.ifName);
   prefs.putString("apilogin", stored.routerApiLogin);
   prefs.putString("apipass", stored.routerApiPassword);
+  prefs.putULong("rciintv", stored.rciIntervalSec);
   prefs.putString("ping",  stored.pingHost);
   prefs.putULong("pintv",  stored.pingIntervalSec);
   prefs.putULong("intv",   stored.updateIntervalSec);

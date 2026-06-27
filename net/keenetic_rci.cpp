@@ -8,6 +8,12 @@
 
 static constexpr uint32_t RCI_HTTP_TIMEOUT_MS = 2500;
 
+static String    g_sessionCookie;
+static IPAddress g_sessionRouterIp;
+static String    g_sessionLogin;
+static uint32_t  g_sessionPasswordFingerprint = 0;
+static bool      g_sessionValid = false;
+
 static bool hasText(const char *value) {
   if (!value) return false;
   while (*value) {
@@ -17,6 +23,44 @@ static bool hasText(const char *value) {
     value++;
   }
   return false;
+}
+
+static uint32_t fingerprintText(const char *value) {
+  uint32_t hash = 2166136261UL;
+  while (value && *value) {
+    hash ^= static_cast<uint8_t>(*value++);
+    hash *= 16777619UL;
+  }
+  return hash;
+}
+
+void keeneticRciResetSession() {
+  g_sessionCookie = "";
+  g_sessionRouterIp = IPAddress();
+  g_sessionLogin = "";
+  g_sessionPasswordFingerprint = 0;
+  g_sessionValid = false;
+}
+
+static bool sessionMatches(IPAddress routerIp,
+                           const char *login,
+                           const char *password) {
+  return g_sessionValid &&
+         g_sessionRouterIp == routerIp &&
+         g_sessionLogin == login &&
+         g_sessionPasswordFingerprint == fingerprintText(password) &&
+         g_sessionCookie.length() > 0;
+}
+
+static void storeSession(IPAddress routerIp,
+                         const char *login,
+                         const char *password,
+                         const String &cookie) {
+  g_sessionRouterIp = routerIp;
+  g_sessionLogin = login;
+  g_sessionPasswordFingerprint = fingerprintText(password);
+  g_sessionCookie = cookie;
+  g_sessionValid = true;
 }
 
 static String extractQuoted(const String &source, const char *key) {
@@ -145,51 +189,118 @@ static bool authenticate(IPAddress routerIp,
   return true;
 }
 
-static bool fetchRciValue(IPAddress routerIp,
-                          const String &cookie,
-                          const char *path,
-                          String &body) {
+static bool ensureAuthenticated(IPAddress routerIp,
+                                const char *login,
+                                const char *password) {
+  if (sessionMatches(routerIp, login, password)) {
+    return true;
+  }
+
+  keeneticRciResetSession();
+  String cookie;
+  if (!authenticate(routerIp, login, password, cookie)) {
+    return false;
+  }
+  storeSession(routerIp, login, password, cookie);
+  return true;
+}
+
+static int fetchRciValue(IPAddress routerIp,
+                         const String &cookie,
+                         const char *path,
+                         String &body) {
+  body = "";
   String url = "http://" + routerIp.toString() + path;
   WiFiClient client;
   HTTPClient http;
   http.setTimeout(RCI_HTTP_TIMEOUT_MS);
   if (!http.begin(client, url)) {
-    return false;
+    return -1;
   }
   http.addHeader("Cookie", cookie);
   int code = http.GET();
-  body = http.getString();
+  if (code == HTTP_CODE_OK) {
+    body = http.getString();
+  }
   http.end();
 
   if (code != HTTP_CODE_OK) {
     Serial.printf("[RCI] %s request failed: http=%d\n", path, code);
-    return false;
+    return code;
   }
   body.trim();
-  return body.length() > 0;
+  return code;
 }
 
-static bool parseJsonStringValue(const String &body, char *out, size_t outLen) {
-  JsonDocument doc;
-  if (deserializeJson(doc, body)) {
+static bool fetchRciValueWithSession(IPAddress routerIp,
+                                     const char *login,
+                                     const char *password,
+                                     const char *path,
+                                     String &body) {
+  if (!ensureAuthenticated(routerIp, login, password)) {
     return false;
   }
-  const char *value = doc.as<const char *>();
-  if (!value || value[0] == '\0') {
+
+  int code = fetchRciValue(routerIp, g_sessionCookie, path, body);
+  if (code == HTTP_CODE_OK) {
+    return body.length() > 0;
+  }
+  if (code != HTTP_CODE_UNAUTHORIZED && code != HTTP_CODE_FORBIDDEN) {
     return false;
   }
-  strncpy(out, value, outLen - 1);
-  out[outLen - 1] = '\0';
+
+  keeneticRciResetSession();
+  if (!ensureAuthenticated(routerIp, login, password)) {
+    return false;
+  }
+  code = fetchRciValue(routerIp, g_sessionCookie, path, body);
+  return code == HTTP_CODE_OK && body.length() > 0;
+}
+
+static bool parseUptimeValue(JsonVariantConst value, uint32_t &uptimeSec) {
+  if (value.is<uint32_t>()) {
+    uptimeSec = value.as<uint32_t>();
+    return true;
+  }
+
+  const char *text = value.as<const char *>();
+  if (!text || text[0] == '\0') {
+    return false;
+  }
+
+  char *end = nullptr;
+  unsigned long uptime = strtoul(text, &end, 10);
+  if (end == text || *end != '\0') return false;
+  uptimeSec = static_cast<uint32_t>(uptime);
   return true;
 }
 
-static bool parseUptimeValue(const String &body, uint32_t &uptimeSec) {
-  char *end = nullptr;
-  unsigned long uptime = strtoul(body.c_str(), &end, 10);
-  if (end == body.c_str()) {
+static bool parseWanData(const String &body, KeeneticRciData &out) {
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, body);
+  if (error || !doc.is<JsonObject>()) {
+    Serial.printf("[RCI] aggregate response is invalid: %s\n",
+                  error ? error.c_str() : "not an object");
     return false;
   }
-  uptimeSec = static_cast<uint32_t>(uptime);
+
+  const char *state = doc["connection-state"] | "";
+  if (state[0] == '\0') {
+    Serial.println("[RCI] aggregate response has no connection-state");
+    return false;
+  }
+  strncpy(out.wanConnectionState, state,
+          sizeof(out.wanConnectionState) - 1);
+  out.wanConnectionState[sizeof(out.wanConnectionState) - 1] = '\0';
+  out.wanConnectionStateValid = true;
+
+  uint32_t uptimeSec = 0;
+  if (parseUptimeValue(doc["uptime"], uptimeSec)) {
+    out.wanUptimeSec = uptimeSec;
+    out.wanUptimeValid = true;
+  } else {
+    Serial.println("[RCI] aggregate response has invalid uptime");
+  }
   return true;
 }
 
@@ -199,38 +310,16 @@ bool keeneticRciFetchWanData(IPAddress routerIp,
                              KeeneticRciData &out) {
   out = KeeneticRciData{};
   if (!hasText(login) || !hasText(password)) {
-    return false;
-  }
-
-  String cookie;
-  if (!authenticate(routerIp, login, password, cookie)) {
+    keeneticRciResetSession();
     return false;
   }
 
   String body;
-  if (!fetchRciValue(routerIp, cookie,
-                     "/rci/show/interface/UsbLte0/connection-state",
-                     body)) {
+  static constexpr const char *WAN_INTERFACE_PATH =
+      "/rci/show/interface/UsbLte0";
+  if (!fetchRciValueWithSession(routerIp, login, password,
+                                WAN_INTERFACE_PATH, body)) {
     return false;
   }
-  if (!parseJsonStringValue(body, out.wanConnectionState,
-                            sizeof(out.wanConnectionState))) {
-    Serial.println("[RCI] connection-state response is invalid");
-    return false;
-  }
-  out.wanConnectionStateValid = true;
-
-  if (fetchRciValue(routerIp, cookie,
-                    "/rci/show/interface/UsbLte0/uptime",
-                    body)) {
-    uint32_t uptimeSec = 0;
-    if (parseUptimeValue(body, uptimeSec)) {
-      out.wanUptimeSec = uptimeSec;
-      out.wanUptimeValid = true;
-    } else {
-      Serial.println("[RCI] uptime response is not a number");
-    }
-  }
-
-  return true;
+  return parseWanData(body, out);
 }

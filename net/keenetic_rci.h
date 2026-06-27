@@ -14,3 +14,4 @@ bool keeneticRciFetchWanData(IPAddress routerIp,
                              const char *login,
                              const char *password,
                              KeeneticRciData &out);
+void keeneticRciResetSession();
