@@ -401,7 +401,7 @@ constexpr int16_t CENTER_DIVIDER_BOTTOM_PDF_Y = 78;
 constexpr int16_t DEVICE_TITLE_Y = 426;
 constexpr int16_t DEVICE_IP_Y = 452;
 
-constexpr uint16_t GLOBE_FRAME_MS = 42;
+constexpr uint16_t GLOBE_FRAME_MS = 84;
 constexpr int16_t GLOBE_RADIUS = 80;
 constexpr int16_t GLOBE_INNER_RING_RADIUS = 78;
 
