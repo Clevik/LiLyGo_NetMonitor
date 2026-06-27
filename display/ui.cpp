@@ -3,14 +3,15 @@
 #include <Arduino_GFX_Library.h>
 #include <esp_heap_caps.h>
 #include <soc/soc_memory_types.h>
-#include <math.h>
-#include <string.h>
+#include <cmath>
+#include <cstring>
 
 #include "config.h"
 #if defined(HW_AMOLED_143)
   #include "globe_frames.h"
 #endif
 #include "ui.h"
+#include "logging.h"
 
 static Arduino_DataBus *g_bus    = nullptr;
 static Arduino_GFX     *g_disp   = nullptr;
@@ -37,7 +38,7 @@ static uint16_t g_histHead  = 0;
 static uint32_t g_lastHistMs = 0;
 
 static void logMemoryState(const char *stage) {
-  Serial.printf(
+  LOG_D(
     "[UI] memory %s: heap free=%u largest=%u min=%u; psram found=%s size=%u free=%u largest=%u min=%u\n",
     stage,
     static_cast<unsigned>(ESP.getFreeHeap()),
@@ -48,7 +49,7 @@ static void logMemoryState(const char *stage) {
     static_cast<unsigned>(ESP.getFreePsram()),
     static_cast<unsigned>(ESP.getMaxAllocPsram()),
     static_cast<unsigned>(ESP.getMinFreePsram()));
-  Serial.printf(
+  LOG_D(
     "[UI] heap caps %s: internal free=%u largest=%u; spiram free=%u largest=%u\n",
     stage,
     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
@@ -59,17 +60,17 @@ static void logMemoryState(const char *stage) {
 
 static void logCanvasFramebuffer(const char *stage) {
   if (!g_canvas) {
-    Serial.printf("[UI] canvas %s: object is null\n", stage);
+    LOG_D("[UI] canvas %s: object is null\n", stage);
     return;
   }
 
   uint16_t *fb = g_canvas->getFramebuffer();
   if (!fb) {
-    Serial.printf("[UI] canvas %s: framebuffer is null\n", stage);
+    LOG_D("[UI] canvas %s: framebuffer is null\n", stage);
     return;
   }
 
-  Serial.printf(
+  LOG_D(
     "[UI] canvas %s: framebuffer=%p allocated=%u bytes location=%s\n",
     stage,
     fb,
@@ -85,10 +86,10 @@ static void pushHistory(float inBps, float outBps) {
 }
 
 bool uiInit() {
-  Serial.printf("[UI] canvas need: %ux%u RGB565 = %u bytes\n",
-                static_cast<unsigned>(SCREEN_W),
-                static_cast<unsigned>(SCREEN_H),
-                static_cast<unsigned>(CANVAS_BUFFER_BYTES));
+  LOG_D("[UI] canvas need: %ux%u RGB565 = %u bytes\n",
+        static_cast<unsigned>(SCREEN_W),
+        static_cast<unsigned>(SCREEN_H),
+        static_cast<unsigned>(CANVAS_BUFFER_BYTES));
   logMemoryState("before init");
 
   pinMode(DISP_PWR_PIN, OUTPUT);
@@ -109,9 +110,9 @@ bool uiInit() {
 
   g_canvas = new Arduino_Canvas(SCREEN_W, SCREEN_H, g_disp);
   if (!g_canvas->begin()) {
-    Serial.printf("[UI] canvas->begin() failed: need %u bytes, psram found=%s\n",
-                  static_cast<unsigned>(CANVAS_BUFFER_BYTES),
-                  psramFound() ? "yes" : "no");
+    LOG_E("[UI] canvas->begin() failed: need %u bytes, psram found=%s\n",
+          static_cast<unsigned>(CANVAS_BUFFER_BYTES),
+          psramFound() ? "yes" : "no");
     logCanvasFramebuffer("after failed begin");
     logMemoryState("after failed begin");
     return false;
@@ -142,25 +143,68 @@ void uiShowSplash() {
   flush();
 }
 
-static void formatSpeed(double bps, char *val, size_t vLen, const char **unit) {
-  if (bps < 1000.0) {
-    snprintf(val, vLen, "%.0f", bps);
-    *unit = "bit";
+enum class SpeedFormatStyle : uint8_t {
+  RectValue,
+  RoundCompact,
+  GraphLabel,
+};
+
+static void formatSpeedText(double bps,
+                            SpeedFormatStyle style,
+                            char *val,
+                            size_t vLen,
+                            const char **unit) {
+  if (!val || vLen == 0 || !unit) return;
+
+  if (!std::isfinite(bps) || bps <= 0.0) {
+    snprintf(val, vLen, (style == SpeedFormatStyle::RoundCompact) ? "-" : "0");
+    *unit = (style == SpeedFormatStyle::RoundCompact) ? "Mbps" :
+            (style == SpeedFormatStyle::GraphLabel) ? "bt" : "bit";
     return;
   }
+
   double kbps = bps / 1000.0;
-  if (kbps < 1.0) {
-    snprintf(val, vLen, "%.0f", bps);
-    *unit = "bit";
-    return;
-  }
   double mbps = kbps / 1000.0;
-  if (mbps < 1.0) {
-    snprintf(val, vLen, "%.0f", kbps);
-    *unit = "Kbit";
-  } else {
-    snprintf(val, vLen, "%.1f", mbps);
-    *unit = "Mbit";
+
+  switch (style) {
+    case SpeedFormatStyle::RectValue:
+      if (kbps < 1.0) {
+        snprintf(val, vLen, "%.0f", bps);
+        *unit = "bit";
+      } else if (mbps < 1.0) {
+        snprintf(val, vLen, "%.0f", kbps);
+        *unit = "Kbit";
+      } else {
+        snprintf(val, vLen, "%.1f", mbps);
+        *unit = "Mbit";
+      }
+      break;
+
+    case SpeedFormatStyle::RoundCompact:
+      if (mbps >= 1.0) {
+        snprintf(val, vLen, (mbps < 100.0) ? "%.1f" : "%.0f", mbps);
+        *unit = "Mbps";
+      } else if (kbps >= 1.0) {
+        snprintf(val, vLen, "%.0f", kbps);
+        *unit = "Kbps";
+      } else {
+        snprintf(val, vLen, "%.0f", bps);
+        *unit = "bps";
+      }
+      break;
+
+    case SpeedFormatStyle::GraphLabel:
+      if (kbps < 1.0) {
+        snprintf(val, vLen, "%.0f", bps);
+        *unit = "bt";
+      } else if (mbps < 1.0) {
+        snprintf(val, vLen, "%.0f", kbps);
+        *unit = "Kb";
+      } else {
+        snprintf(val, vLen, (mbps < 10.0) ? "%.1f" : "%.0f", mbps);
+        *unit = "Mb";
+      }
+      break;
   }
 }
 
@@ -311,12 +355,66 @@ static constexpr uint16_t CLR_ROUND_ALARM    = rgb565(0xFF, 0x30, 0x30);
 static constexpr uint16_t CLR_ROUND_DIM_BLUE = rgb565(0x00, 0x18, 0x30);
 static constexpr uint16_t CLR_ROUND_DIM_GN   = rgb565(0x00, 0x28, 0x10);
 
+namespace RoundLayout {
+constexpr int16_t CENTER_X = SCREEN_W / 2;
+constexpr int16_t CENTER_Y = SCREEN_H / 2;
+
+constexpr int16_t OUTER_RING_RADIUS = 228;
+constexpr int16_t INNER_RING_RADIUS = 223;
+
+constexpr int16_t HISTORY_ARC_RADIUS = 205;
+constexpr uint16_t HISTORY_ARC_MAX_SAMPLES = 60;
+constexpr float HISTORY_IN_START_DEG = 130.0f;
+constexpr float HISTORY_IN_END_DEG = 230.0f;
+constexpr float HISTORY_OUT_START_DEG = -50.0f;
+constexpr float HISTORY_OUT_END_DEG = 50.0f;
+
+constexpr int16_t LINE_GRAPH_X = 60;
+constexpr int16_t LINE_GRAPH_W = 346;
+constexpr int16_t LINE_GRAPH_IN_PDF_Y = 72;
+constexpr int16_t LINE_GRAPH_IN_H = 28;
+constexpr int16_t LINE_GRAPH_OUT_PDF_Y = 35;
+constexpr int16_t LINE_GRAPH_OUT_H = 24;
+
+constexpr int16_t LEFT_METRIC_X = 115;
+constexpr int16_t RIGHT_METRIC_X = 351;
+constexpr int16_t GLOBE_PDF_Y = 255;
+constexpr int16_t PING_ICON_PDF_Y = 275;
+constexpr int16_t PING_VALUE_PDF_Y = 210;
+
+constexpr int16_t ROUTER_TITLE_Y = 14;
+constexpr int16_t ROUTER_VALUE_PDF_Y = 425;
+constexpr int16_t STATUS_PDF_Y = 360;
+
+constexpr int16_t SPEED_ARROW_PDF_Y = 120;
+constexpr int16_t SPEED_VALUE_PDF_Y = 130;
+constexpr int16_t SPEED_UNIT_PDF_Y = 95;
+constexpr int16_t SPEED_IN_VALUE_X = 165;
+constexpr int16_t SPEED_OUT_ARROW_X = 290;
+constexpr int16_t SPEED_OUT_VALUE_X = 340;
+
+constexpr int16_t CENTER_DIVIDER_TOP_PDF_Y = 124;
+constexpr int16_t CENTER_DIVIDER_BOTTOM_PDF_Y = 78;
+
+constexpr int16_t DEVICE_TITLE_Y = 426;
+constexpr int16_t DEVICE_IP_Y = 452;
+
+constexpr uint16_t GLOBE_FRAME_MS = 42;
+constexpr int16_t GLOBE_RADIUS = 80;
+constexpr int16_t GLOBE_INNER_RING_RADIUS = 78;
+
+constexpr int16_t PING_LOSS_TEXT_Y_OFFSET = -5;
+constexpr int16_t PING_LOSS_UNIT_Y_OFFSET = 30;
+constexpr int16_t PING_VALUE_Y_OFFSET = -7;
+constexpr int16_t PING_UNIT_Y_OFFSET = 31;
+}  // namespace RoundLayout
+
 static int16_t centerYFromPdf(int16_t pdfY) {
   return static_cast<int16_t>(SCREEN_H) - pdfY;
 }
 
 static int16_t textPixelWidth(const char *text, uint8_t size) {
-  return static_cast<int16_t>(strlen(text) * 6U * size);
+  return static_cast<int16_t>(std::strlen(text) * 6U * size);
 }
 
 static int16_t textPixelHeight(uint8_t size) {
@@ -379,32 +477,6 @@ static uint16_t statusColor(const Telemetry &t) {
   }
   if (t.pingValid && !t.pingLoss) return CLR_ROUND_WARN;
   return CLR_ROUND_ALARM;
-}
-
-static void formatSpeedCompact(double bps, char *val, size_t vLen,
-                               char *unit, size_t uLen) {
-  if (!isfinite(bps) || bps <= 0.0) {
-    snprintf(val, vLen, "-");
-    snprintf(unit, uLen, "Mbps");
-    return;
-  }
-
-  double mbps = bps / 1000000.0;
-  if (mbps >= 1.0) {
-    snprintf(val, vLen, (mbps < 100.0) ? "%.1f" : "%.0f", mbps);
-    snprintf(unit, uLen, "Mbps");
-    return;
-  }
-
-  double kbps = bps / 1000.0;
-  if (kbps >= 1.0) {
-    snprintf(val, vLen, "%.0f", kbps);
-    snprintf(unit, uLen, "Kbps");
-    return;
-  }
-
-  snprintf(val, vLen, "%.0f", bps);
-  snprintf(unit, uLen, "bps");
 }
 
 static uint16_t historyStartIndex() {
@@ -487,17 +559,17 @@ static void drawHistoryArc(const float *data,
                            uint16_t color,
                            uint16_t dimColor) {
   static constexpr float DEG = 3.1415926535f / 180.0f;
-  constexpr int16_t cx = 233;
-  constexpr int16_t cy = 233;
-  constexpr int16_t radius = 205;
-  constexpr uint16_t maxSamples = 60;
 
-  drawArcSegment(cx, cy, radius, startDeg, endDeg, dimColor, 2);
+  drawArcSegment(RoundLayout::CENTER_X, RoundLayout::CENTER_Y,
+                 RoundLayout::HISTORY_ARC_RADIUS, startDeg, endDeg,
+                 dimColor, 2);
 
   if (g_histCount < 2) return;
 
   uint16_t samples = g_histCount;
-  if (samples > maxSamples) samples = maxSamples;
+  if (samples > RoundLayout::HISTORY_ARC_MAX_SAMPLES) {
+    samples = RoundLayout::HISTORY_ARC_MAX_SAMPLES;
+  }
   uint16_t offset = g_histCount - samples;
   float maxVal = historyMax(data, offset, samples);
 
@@ -511,10 +583,16 @@ static void drawHistoryArc(const float *data,
 
     int16_t len = 4 + static_cast<int16_t>(norm * 24.0f);
     float rad = angle * DEG;
-    int16_t x0 = cx + static_cast<int16_t>(cosf(rad) * (radius + 2));
-    int16_t y0 = cy - static_cast<int16_t>(sinf(rad) * (radius + 2));
-    int16_t x1 = cx + static_cast<int16_t>(cosf(rad) * (radius + 2 - len));
-    int16_t y1 = cy - static_cast<int16_t>(sinf(rad) * (radius + 2 - len));
+    int16_t x0 = RoundLayout::CENTER_X +
+                 static_cast<int16_t>(cosf(rad) * (RoundLayout::HISTORY_ARC_RADIUS + 2));
+    int16_t y0 = RoundLayout::CENTER_Y -
+                 static_cast<int16_t>(sinf(rad) * (RoundLayout::HISTORY_ARC_RADIUS + 2));
+    int16_t x1 = RoundLayout::CENTER_X +
+                 static_cast<int16_t>(cosf(rad) *
+                                      (RoundLayout::HISTORY_ARC_RADIUS + 2 - len));
+    int16_t y1 = RoundLayout::CENTER_Y -
+                 static_cast<int16_t>(sinf(rad) *
+                                      (RoundLayout::HISTORY_ARC_RADIUS + 2 - len));
     g_canvas->drawLine(x0, y0, x1, y1, color);
     g_canvas->drawLine(x0, y0 + 1, x1, y1 + 1, color);
   }
@@ -567,13 +645,16 @@ static void drawUpArrow(int16_t x, int16_t y, uint16_t color) {
 }
 
 static void drawGlobeFrame(int16_t centerX, int16_t centerY) {
-  uint8_t frame = (millis() / 42U) % GLOBE_FRAME_COUNT;
+  uint8_t frame = (millis() / RoundLayout::GLOBE_FRAME_MS) % GLOBE_FRAME_COUNT;
   int16_t x0 = centerX - (GLOBE_MASK_W * GLOBE_CELL_PX) / 2;
   int16_t y0 = centerY - (GLOBE_MASK_H * GLOBE_CELL_PX) / 2;
 
-  g_canvas->fillCircle(centerX, centerY, 80, rgb565(0x00, 0x06, 0x10));
-  g_canvas->drawCircle(centerX, centerY, 80, CLR_ROUND_UPLOAD);
-  g_canvas->drawCircle(centerX, centerY, 78, CLR_ROUND_DIM_BLUE);
+  g_canvas->fillCircle(centerX, centerY, RoundLayout::GLOBE_RADIUS,
+                       rgb565(0x00, 0x06, 0x10));
+  g_canvas->drawCircle(centerX, centerY, RoundLayout::GLOBE_RADIUS,
+                       CLR_ROUND_UPLOAD);
+  g_canvas->drawCircle(centerX, centerY, RoundLayout::GLOBE_INNER_RING_RADIUS,
+                       CLR_ROUND_DIM_BLUE);
 
   for (uint8_t y = 0; y < GLOBE_MASK_H; y++) {
     for (uint8_t byteX = 0; byteX < GLOBE_MASK_W / 8; byteX++) {
@@ -598,16 +679,22 @@ static void drawPingBlock(int16_t centerX,
                           uint32_t ms,
                           uint16_t color) {
   if (loss || !valid) {
-    drawTextCentered(loss ? "loss" : "--", centerX, valueY - 5, 4,
+    drawTextCentered(loss ? "loss" : "--", centerX,
+                     valueY + RoundLayout::PING_LOSS_TEXT_Y_OFFSET, 4,
                      loss ? CLR_ROUND_ALARM : CLR_DIM);
-    drawTextCentered("ms", centerX, valueY + 30, 3, loss ? CLR_ROUND_ALARM : CLR_DIM);
+    drawTextCentered("ms", centerX,
+                     valueY + RoundLayout::PING_LOSS_UNIT_Y_OFFSET, 3,
+                     loss ? CLR_ROUND_ALARM : CLR_DIM);
     return;
   }
 
   char buf[12];
   snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(ms));
-  drawTextCenteredGlow(buf, centerX, valueY - 7, 5, color, CLR_ROUND_DIM_BLUE);
-  drawTextCentered("ms", centerX, valueY + 31, 3, color);
+  drawTextCenteredGlow(buf, centerX,
+                       valueY + RoundLayout::PING_VALUE_Y_OFFSET, 5,
+                       color, CLR_ROUND_DIM_BLUE);
+  drawTextCentered("ms", centerX, valueY + RoundLayout::PING_UNIT_Y_OFFSET,
+                   3, color);
 }
 
 static void drawSpeedBlock(int16_t arrowX,
@@ -616,15 +703,17 @@ static void drawSpeedBlock(int16_t arrowX,
                            double bps) {
   uint16_t color = upload ? CLR_ROUND_UPLOAD : CLR_ROUND_DOWNLOAD;
   char value[16];
-  char unit[8];
-  formatSpeedCompact(bps, value, sizeof(value), unit, sizeof(unit));
+  const char *unit = "Mbps";
+  formatSpeedText(bps, SpeedFormatStyle::RoundCompact, value, sizeof(value),
+                  &unit);
 
-  int16_t valueY = centerYFromPdf(130);
-  int16_t unitY  = centerYFromPdf(95);
+  int16_t valueY = centerYFromPdf(RoundLayout::SPEED_VALUE_PDF_Y);
+  int16_t unitY  = centerYFromPdf(RoundLayout::SPEED_UNIT_PDF_Y);
   if (upload) {
-    drawUpArrow(arrowX, centerYFromPdf(120), color);
+    drawUpArrow(arrowX, centerYFromPdf(RoundLayout::SPEED_ARROW_PDF_Y), color);
   } else {
-    drawDownArrow(arrowX, centerYFromPdf(120), color);
+    drawDownArrow(arrowX, centerYFromPdf(RoundLayout::SPEED_ARROW_PDF_Y),
+                  color);
   }
   drawTextCenteredGlow(value, valueX, valueY, 5, CLR_TEXT,
                        upload ? CLR_ROUND_DIM_BLUE : CLR_ROUND_DIM_GN);
@@ -659,18 +748,17 @@ void uiShowApConfig(const char *apName, const char *apIp) {
 }
 
 void uiShowConnecting(const char *ssid) {
-  strncpy(g_connectSsid, ssid ? ssid : "", sizeof(g_connectSsid) - 1);
+  std::strncpy(g_connectSsid, ssid ? ssid : "", sizeof(g_connectSsid) - 1);
   g_connectSsid[sizeof(g_connectSsid) - 1] = '\0';
   uiUpdateConnecting();
 }
 
 void uiSetRouterIp(const char *ip) {
-  strncpy(g_routerIp, ip ? ip : "", sizeof(g_routerIp) - 1);
+  std::strncpy(g_routerIp, ip ? ip : "", sizeof(g_routerIp) - 1);
   g_routerIp[sizeof(g_routerIp) - 1] = '\0';
 }
 
 void uiUpdateConnecting() {
-  static const uint8_t active[] = { 0, 1, 2, 3, 4 };
   uint8_t frame = (millis() / 400) % 5;
 
   g_canvas->fillScreen(CLR_BG);
@@ -682,7 +770,7 @@ void uiUpdateConnecting() {
 
   for (int i = 0; i < 4; i++) {
     g_canvas->setTextColor(
-      (frame < 4 && i == active[frame]) ? CLR_PING : CLR_DIM);
+      (frame < 4 && i == frame) ? CLR_PING : CLR_DIM);
     g_canvas->print(".");
   }
 
@@ -728,48 +816,80 @@ static void uiShowMainRound(const Telemetry &t) {
 
   // Тонкие внутренние кольца помогают круглому экрану выглядеть как макет,
   // но остаются внутри физической active area.
-  g_canvas->drawCircle(233, 233, 228, rgb565(0x28, 0x2D, 0x33));
-  g_canvas->drawCircle(233, 233, 223, rgb565(0x11, 0x16, 0x1C));
+  g_canvas->drawCircle(RoundLayout::CENTER_X, RoundLayout::CENTER_Y,
+                       RoundLayout::OUTER_RING_RADIUS,
+                       rgb565(0x28, 0x2D, 0x33));
+  g_canvas->drawCircle(RoundLayout::CENTER_X, RoundLayout::CENTER_Y,
+                       RoundLayout::INNER_RING_RADIUS,
+                       rgb565(0x11, 0x16, 0x1C));
 
-  drawHistoryArc(g_histIn,  130.0f, 230.0f, CLR_ROUND_DOWNLOAD, CLR_ROUND_DIM_GN);
-  drawHistoryArc(g_histOut, -50.0f,  50.0f, CLR_ROUND_UPLOAD,   CLR_ROUND_DIM_BLUE);
+  drawHistoryArc(g_histIn, RoundLayout::HISTORY_IN_START_DEG,
+                 RoundLayout::HISTORY_IN_END_DEG, CLR_ROUND_DOWNLOAD,
+                 CLR_ROUND_DIM_GN);
+  drawHistoryArc(g_histOut, RoundLayout::HISTORY_OUT_START_DEG,
+                 RoundLayout::HISTORY_OUT_END_DEG, CLR_ROUND_UPLOAD,
+                 CLR_ROUND_DIM_BLUE);
 
-  drawLineGraph(g_histIn,  60, centerYFromPdf(72) - 28, 346, 28,
+  drawLineGraph(g_histIn, RoundLayout::LINE_GRAPH_X,
+                centerYFromPdf(RoundLayout::LINE_GRAPH_IN_PDF_Y) -
+                    RoundLayout::LINE_GRAPH_IN_H,
+                RoundLayout::LINE_GRAPH_W, RoundLayout::LINE_GRAPH_IN_H,
                 CLR_ROUND_DOWNLOAD, CLR_ROUND_DIM_GN);
-  drawLineGraph(g_histOut, 60, centerYFromPdf(35) - 24, 346, 24,
+  drawLineGraph(g_histOut, RoundLayout::LINE_GRAPH_X,
+                centerYFromPdf(RoundLayout::LINE_GRAPH_OUT_PDF_Y) -
+                    RoundLayout::LINE_GRAPH_OUT_H,
+                RoundLayout::LINE_GRAPH_W, RoundLayout::LINE_GRAPH_OUT_H,
                 CLR_ROUND_UPLOAD, CLR_ROUND_DIM_BLUE);
 
-  drawGlobeFrame(233, centerYFromPdf(255));
+  drawGlobeFrame(RoundLayout::CENTER_X,
+                 centerYFromPdf(RoundLayout::GLOBE_PDF_Y));
 
-  drawWifiIcon(115, centerYFromPdf(275), CLR_ROUND_DOWNLOAD);
-  drawGlobeIcon(351, centerYFromPdf(275), CLR_ROUND_UPLOAD);
+  drawWifiIcon(RoundLayout::LEFT_METRIC_X,
+               centerYFromPdf(RoundLayout::PING_ICON_PDF_Y),
+               CLR_ROUND_DOWNLOAD);
+  drawGlobeIcon(RoundLayout::RIGHT_METRIC_X,
+                centerYFromPdf(RoundLayout::PING_ICON_PDF_Y),
+                CLR_ROUND_UPLOAD);
 
   {
     char title[48];
     char value[32];
     formatRouterInfo(t, title, sizeof(title), value, sizeof(value));
-    drawTextCentered(title, 233, 14, 2, CLR_DIM);
-    drawTextCentered(value, 233, centerYFromPdf(425), 4, CLR_TEXT);
+    drawTextCentered(title, RoundLayout::CENTER_X,
+                     RoundLayout::ROUTER_TITLE_Y, 2, CLR_DIM);
+    drawTextCentered(value, RoundLayout::CENTER_X,
+                     centerYFromPdf(RoundLayout::ROUTER_VALUE_PDF_Y),
+                     4, CLR_TEXT);
   }
-  drawTextCenteredGlow(statusText(t), 233, centerYFromPdf(360), 9,
-                       statusColor(t), statusColor(t));
+  drawTextCenteredGlow(statusText(t), RoundLayout::CENTER_X,
+                       centerYFromPdf(RoundLayout::STATUS_PDF_Y),
+                       9, statusColor(t), statusColor(t));
 
   bool routerValid = t.dataValid && t.routerPingValid;
-  drawPingBlock(115, centerYFromPdf(210),
+  drawPingBlock(RoundLayout::LEFT_METRIC_X,
+                centerYFromPdf(RoundLayout::PING_VALUE_PDF_Y),
                 routerValid, t.dataValid && !t.routerPingValid,
                 t.routerPingMs, CLR_ROUND_DOWNLOAD);
-  drawPingBlock(351, centerYFromPdf(210),
+  drawPingBlock(RoundLayout::RIGHT_METRIC_X,
+                centerYFromPdf(RoundLayout::PING_VALUE_PDF_Y),
                 t.dataValid && t.pingValid, t.dataValid && t.pingLoss,
                 t.pingMs, CLR_ROUND_UPLOAD);
 
-  g_canvas->drawLine(233, centerYFromPdf(124), 233, centerYFromPdf(78),
+  g_canvas->drawLine(RoundLayout::CENTER_X,
+                     centerYFromPdf(RoundLayout::CENTER_DIVIDER_TOP_PDF_Y),
+                     RoundLayout::CENTER_X,
+                     centerYFromPdf(RoundLayout::CENTER_DIVIDER_BOTTOM_PDF_Y),
                      rgb565(0x80, 0x80, 0x80));
-  drawSpeedBlock(115, 165, false, t.inBps);
-  drawSpeedBlock(290, 340, true,  t.outBps);
+  drawSpeedBlock(RoundLayout::LEFT_METRIC_X, RoundLayout::SPEED_IN_VALUE_X,
+                 false, t.inBps);
+  drawSpeedBlock(RoundLayout::SPEED_OUT_ARROW_X,
+                 RoundLayout::SPEED_OUT_VALUE_X, true, t.outBps);
 
   String ip = WiFi.localIP().toString();
-  drawTextCentered("DEVICE IP", 233, 426, 2, CLR_TEXT);
-  drawTextCentered(ip.c_str(), 233, 452, 3, CLR_TEXT);
+  drawTextCentered("DEVICE IP", RoundLayout::CENTER_X,
+                   RoundLayout::DEVICE_TITLE_Y, 2, CLR_TEXT);
+  drawTextCentered(ip.c_str(), RoundLayout::CENTER_X,
+                   RoundLayout::DEVICE_IP_Y, 3, CLR_TEXT);
 
   flush();
 }
@@ -804,7 +924,7 @@ static void drawRectPingValue(const char *value,
   int16_t iconCenterX = iconRight - ICON_W / 2;
   int16_t valueRight = iconRight - ICON_W - ICON_GAP;
   int16_t valueX =
-      valueRight - static_cast<int16_t>(strlen(value) * 6U * TEXT_SIZE);
+      valueRight - static_cast<int16_t>(std::strlen(value) * 6U * TEXT_SIZE);
 
   g_canvas->setTextSize(TEXT_SIZE);
   g_canvas->setTextColor(color);
@@ -854,7 +974,7 @@ static void uiShowMainRect(const Telemetry &t) {
   if (t.dataValid) {
     rectStatusColor = statusColorRect(t);
     rectStatusText = statusText(t);
-    if (strcmp(rectStatusText, "UP") == 0) {
+    if (std::strcmp(rectStatusText, "UP") == 0) {
       rectStatusText = " UP ";
       rectStatusX = 275;
     }
@@ -862,14 +982,14 @@ static void uiShowMainRect(const Telemetry &t) {
 
   int16_t statusCenterX =
       rectStatusX +
-      static_cast<int16_t>(strlen(rectStatusText) * 6U * RECT_STATUS_TEXT_SIZE) / 2;
+      static_cast<int16_t>(std::strlen(rectStatusText) * 6U * RECT_STATUS_TEXT_SIZE) / 2;
 
   if (t.interfaceAliasValid && t.interfaceAlias[0] != '\0') {
     g_canvas->setTextSize(3);
     g_canvas->setTextColor(CLR_TEXT);
     int16_t aliasX =
         statusCenterX -
-        static_cast<int16_t>(strlen(t.interfaceAlias) * 6U * 3U) / 2;
+        static_cast<int16_t>(std::strlen(t.interfaceAlias) * 6U * 3U) / 2;
     g_canvas->setCursor(aliasX, ZONE_A_Y + 4);
     g_canvas->print(t.interfaceAlias);
   }
@@ -935,7 +1055,8 @@ static void uiShowMainRect(const Telemetry &t) {
       char valBuf[16];
       const char *unit = "bit";
       if (t.inBps > 0.0) {
-        formatSpeed(t.inBps, valBuf, sizeof(valBuf), &unit);
+        formatSpeedText(t.inBps, SpeedFormatStyle::RectValue, valBuf,
+                        sizeof(valBuf), &unit);
         g_canvas->print(valBuf);
       } else {
         g_canvas->print("-");
@@ -957,7 +1078,8 @@ static void uiShowMainRect(const Telemetry &t) {
       char valBuf[16];
       const char *unit = "bit";
       if (t.outBps > 0.0) {
-        formatSpeed(t.outBps, valBuf, sizeof(valBuf), &unit);
+        formatSpeedText(t.outBps, SpeedFormatStyle::RectValue, valBuf,
+                        sizeof(valBuf), &unit);
         g_canvas->print(valBuf);
       } else {
         g_canvas->print("-");
@@ -1017,28 +1139,11 @@ static void uiShowMainRect(const Telemetry &t) {
       constexpr int16_t CH_W  = 12;
       constexpr int16_t CH_H  = 16;
 
-      auto fmtUnit = [](float bps, char *v, size_t n, const char **u) {
-        if (bps < 1000.0f) {
-          snprintf(v, n, "%.0f", bps);
-          *u = "bt";
-        } else {
-          float kb = bps / 1000.0f;
-          if (kb < 1000.0f) {
-            snprintf(v, n, "%.0f", kb);
-            *u = "Kb";
-          } else {
-            float mb = kb / 1000.0f;
-            snprintf(v, n, (mb < 10.0f) ? "%.1f" : "%.0f", mb);
-            *u = "Mb";
-          }
-        }
-      };
-
       auto drawPill = [&](float bps, int16_t px, int16_t py) {
         char v[16];
-        const char *u;
-        fmtUnit(bps, v, sizeof(v), &u);
-        int textLen = strlen(v) + 1 + strlen(u);
+        const char *u = "bt";
+        formatSpeedText(bps, SpeedFormatStyle::GraphLabel, v, sizeof(v), &u);
+        int textLen = std::strlen(v) + 1 + std::strlen(u);
         int16_t w = textLen * CH_W + PAD * 2;
         int16_t h = CH_H + PAD * 2;
         g_canvas->fillRoundRect(px, py, w, h, RAD, CLR_LABEL_BG);
@@ -1074,10 +1179,6 @@ void uiShowMain(const Telemetry &t) {
 #endif
 }
 
-void uiUpdateMain(const Telemetry &t) {
-  uiShowMain(t);
-}
-
 bool uiDisplayEnabled() {
   return BRIGHTNESS_LEVELS[g_brightnessIdx] > 0;
 }
@@ -1103,5 +1204,5 @@ void uiCycleBrightness() {
   if (!wasEnabled && val > 0) {
     g_redrawRequested = true;
   }
-  Serial.printf("[UI] brightness -> %d (0x%02X)\n", g_brightnessIdx, val);
+  LOG_I("[UI] brightness -> %d (0x%02X)\n", g_brightnessIdx, val);
 }
