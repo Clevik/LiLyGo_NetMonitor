@@ -386,6 +386,7 @@ constexpr uint8_t ROUTER_TITLE_TEXT_SIZE = 2;
 constexpr uint8_t ROUTER_VALUE_TEXT_SIZE = 3;
 constexpr int16_t ROUTER_TITLE_VALUE_GAP = 10;
 constexpr int16_t STATUS_PDF_Y = 360;
+constexpr int16_t STATUS_CENTER_X_OFFSET = 3;
 
 constexpr int16_t SPEED_ARROW_PDF_Y = 120;
 constexpr int16_t SPEED_VALUE_PDF_Y = 130;
@@ -928,7 +929,9 @@ static void uiShowMainRound(const Telemetry &t) {
                      routerValueCenterY(),
                      RoundLayout::ROUTER_VALUE_TEXT_SIZE, CLR_TEXT);
   }
-  drawTextCenteredGlow(statusText(t), RoundLayout::CENTER_X,
+  drawTextCenteredGlow(statusText(t),
+                       RoundLayout::CENTER_X +
+                           RoundLayout::STATUS_CENTER_X_OFFSET,
                        centerYFromPdf(RoundLayout::STATUS_PDF_Y),
                        5, statusColor(t), statusColor(t));
 
