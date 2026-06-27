@@ -376,10 +376,6 @@ constexpr int16_t LINE_GRAPH_OUT_PDF_Y = 35;
 constexpr int16_t LINE_GRAPH_OUT_H = 24;
 
 constexpr int16_t LEFT_METRIC_X = 115;
-constexpr int16_t RIGHT_METRIC_X = 351;
-constexpr int16_t GLOBE_PDF_Y = 255;
-constexpr int16_t PING_ICON_PDF_Y = 275;
-constexpr int16_t PING_VALUE_PDF_Y = 210;
 
 constexpr int16_t ROUTER_TITLE_Y = 30;
 constexpr uint8_t ROUTER_TITLE_TEXT_SIZE = 2;
@@ -387,6 +383,23 @@ constexpr uint8_t ROUTER_VALUE_TEXT_SIZE = 3;
 constexpr int16_t ROUTER_TITLE_VALUE_GAP = 10;
 constexpr int16_t STATUS_PDF_Y = 360;
 constexpr int16_t STATUS_CENTER_X_OFFSET = 3;
+
+constexpr int16_t GLOBE_PDF_Y = 255;
+constexpr int16_t GLOBE_RADIUS = 80;
+constexpr int16_t PING_VALUE_PDF_Y = 210;
+constexpr uint8_t PING_VALUE_TEXT_SIZE = ROUTER_VALUE_TEXT_SIZE;
+constexpr int16_t PING_MAX_VALUE_DIGITS = 5;
+constexpr int16_t PING_ZONE_W =
+    PING_MAX_VALUE_DIGITS * 6 * PING_VALUE_TEXT_SIZE;
+constexpr int16_t PING_ZONE_LEFT_X =
+    CENTER_X - GLOBE_RADIUS - PING_ZONE_W;
+constexpr int16_t PING_ZONE_RIGHT_X = CENTER_X + GLOBE_RADIUS + 1;
+constexpr int16_t PING_LEFT_CENTER_X = PING_ZONE_LEFT_X + PING_ZONE_W / 2;
+constexpr int16_t PING_RIGHT_CENTER_X = PING_ZONE_RIGHT_X + PING_ZONE_W / 2;
+constexpr int16_t PING_ZONE_Y = 155;
+constexpr int16_t PING_ZONE_H = 108;
+constexpr int16_t PING_ICON_TOP_Y = PING_ZONE_Y + 7;
+constexpr int16_t PING_ICON_RADIUS = 22;
 
 constexpr int16_t SPEED_ARROW_PDF_Y = 120;
 constexpr int16_t SPEED_VALUE_PDF_Y = 130;
@@ -402,13 +415,9 @@ constexpr int16_t DEVICE_TITLE_Y = 426;
 constexpr int16_t DEVICE_IP_Y = 452;
 
 constexpr uint16_t GLOBE_FRAME_MS = 168;
-constexpr int16_t GLOBE_RADIUS = 80;
 constexpr int16_t GLOBE_INNER_RING_RADIUS = 78;
 
-constexpr int16_t PING_LOSS_TEXT_Y_OFFSET = -5;
-constexpr int16_t PING_LOSS_UNIT_Y_OFFSET = 30;
-constexpr int16_t PING_VALUE_Y_OFFSET = -7;
-constexpr int16_t PING_UNIT_Y_OFFSET = 31;
+constexpr int16_t PING_VALUE_Y_OFFSET = -22;
 }  // namespace RoundLayout
 
 struct RoundDebugZone {
@@ -488,8 +497,6 @@ static void drawRoundDebugZones() {
 
   static constexpr RoundDebugZone zones[] = {
       {"SCREEN", 0, 0, SCREEN_W, SCREEN_H, CLR_DIM},
-      {"PING_L", 40, 155, 150, 142, CLR_DEBUG_LEFT},
-      {"PING_R", 276, 155, 150, 142, CLR_DEBUG_RIGHT},
       {"GLOBE", RoundLayout::CENTER_X - RoundLayout::GLOBE_RADIUS,
        centerYFromPdf(RoundLayout::GLOBE_PDF_Y) - RoundLayout::GLOBE_RADIUS,
        RoundLayout::GLOBE_RADIUS * 2, RoundLayout::GLOBE_RADIUS * 2,
@@ -684,21 +691,40 @@ static void drawEllipse(int16_t cx,
   }
 }
 
-static void drawWifiIcon(int16_t x, int16_t y, uint16_t color) {
-  int16_t baseY = y + 22;
-  drawArcSegment(x, baseY, 36, 46.0f, 134.0f, color, 4);
-  drawArcSegment(x, baseY, 25, 50.0f, 130.0f, color, 4);
-  drawArcSegment(x, baseY, 14, 55.0f, 125.0f, color, 4);
-  g_canvas->fillCircle(x, baseY - 1, 5, color);
+static void drawRouterIcon(int16_t centerX, int16_t topY, uint16_t color) {
+  constexpr int16_t BODY_TOP_OFFSET = 18;
+  constexpr int16_t BODY_HALF_W = 21;
+  constexpr int16_t BODY_H = 19;
+
+  int16_t bodyTop = topY + BODY_TOP_OFFSET;
+  g_canvas->drawLine(centerX - 15, bodyTop, centerX - 21, topY, color);
+  g_canvas->drawLine(centerX - 14, bodyTop, centerX - 20, topY, color);
+  g_canvas->drawLine(centerX + 15, bodyTop, centerX + 21, topY, color);
+  g_canvas->drawLine(centerX + 14, bodyTop, centerX + 20, topY, color);
+  g_canvas->drawRect(centerX - BODY_HALF_W, bodyTop,
+                     BODY_HALF_W * 2 + 1, BODY_H, color);
+  g_canvas->drawRect(centerX - BODY_HALF_W + 1, bodyTop + 1,
+                     BODY_HALF_W * 2 - 1, BODY_H - 2, color);
+  g_canvas->fillCircle(centerX - 11, bodyTop + 9, 2, color);
+  g_canvas->fillCircle(centerX - 3, bodyTop + 9, 2, color);
+  g_canvas->fillCircle(centerX + 5, bodyTop + 9, 2, color);
+  g_canvas->drawLine(centerX - 15, bodyTop + BODY_H,
+                     centerX - 17, topY + 43, color);
+  g_canvas->drawLine(centerX + 15, bodyTop + BODY_H,
+                     centerX + 17, topY + 43, color);
 }
 
-static void drawGlobeIcon(int16_t x, int16_t y, uint16_t color) {
-  g_canvas->drawCircle(x, y, 29, color);
-  g_canvas->drawCircle(x, y, 28, color);
-  g_canvas->drawLine(x - 28, y, x + 28, y, color);
-  g_canvas->drawLine(x, y - 28, x, y + 28, color);
-  drawEllipse(x, y, 12, 28, color);
-  drawEllipse(x, y, 22, 28, color);
+static void drawGlobeIcon(int16_t centerX, int16_t topY, uint16_t color) {
+  int16_t centerY = topY + RoundLayout::PING_ICON_RADIUS;
+  int16_t radius = RoundLayout::PING_ICON_RADIUS;
+  g_canvas->drawCircle(centerX, centerY, radius, color);
+  g_canvas->drawCircle(centerX, centerY, radius - 1, color);
+  g_canvas->drawLine(centerX - radius + 1, centerY,
+                     centerX + radius - 1, centerY, color);
+  g_canvas->drawLine(centerX, centerY - radius + 1,
+                     centerX, centerY + radius - 1, color);
+  drawEllipse(centerX, centerY, 9, radius - 1, color);
+  drawEllipse(centerX, centerY, 17, radius - 1, color);
 }
 
 static void drawDownArrow(int16_t x, int16_t y, uint16_t color) {
@@ -747,10 +773,8 @@ static void drawPingBlock(int16_t centerX,
                           uint16_t color) {
   if (loss || !valid) {
     drawTextCentered(loss ? "loss" : "--", centerX,
-                     valueY + RoundLayout::PING_LOSS_TEXT_Y_OFFSET, 4,
-                     loss ? CLR_ROUND_ALARM : CLR_DIM);
-    drawTextCentered("ms", centerX,
-                     valueY + RoundLayout::PING_LOSS_UNIT_Y_OFFSET, 3,
+                     valueY + RoundLayout::PING_VALUE_Y_OFFSET,
+                     RoundLayout::PING_VALUE_TEXT_SIZE,
                      loss ? CLR_ROUND_ALARM : CLR_DIM);
     return;
   }
@@ -758,10 +782,9 @@ static void drawPingBlock(int16_t centerX,
   char buf[12];
   snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(ms));
   drawTextCenteredGlow(buf, centerX,
-                       valueY + RoundLayout::PING_VALUE_Y_OFFSET, 5,
+                       valueY + RoundLayout::PING_VALUE_Y_OFFSET,
+                       RoundLayout::PING_VALUE_TEXT_SIZE,
                        color, CLR_ROUND_DIM_BLUE);
-  drawTextCentered("ms", centerX, valueY + RoundLayout::PING_UNIT_Y_OFFSET,
-                   3, color);
 }
 
 static void drawSpeedBlock(int16_t arrowX,
@@ -911,11 +934,11 @@ static void uiShowMainRound(const Telemetry &t) {
   drawGlobeFrame(RoundLayout::CENTER_X,
                  centerYFromPdf(RoundLayout::GLOBE_PDF_Y));
 
-  drawWifiIcon(RoundLayout::LEFT_METRIC_X,
-               centerYFromPdf(RoundLayout::PING_ICON_PDF_Y),
-               CLR_ROUND_DOWNLOAD);
-  drawGlobeIcon(RoundLayout::RIGHT_METRIC_X,
-                centerYFromPdf(RoundLayout::PING_ICON_PDF_Y),
+  drawRouterIcon(RoundLayout::PING_LEFT_CENTER_X,
+                 RoundLayout::PING_ICON_TOP_Y,
+                 CLR_ROUND_DOWNLOAD);
+  drawGlobeIcon(RoundLayout::PING_RIGHT_CENTER_X,
+                RoundLayout::PING_ICON_TOP_Y,
                 CLR_ROUND_UPLOAD);
 
   {
@@ -936,11 +959,11 @@ static void uiShowMainRound(const Telemetry &t) {
                        5, statusColor(t), statusColor(t));
 
   bool routerValid = t.dataValid && t.routerPingValid;
-  drawPingBlock(RoundLayout::LEFT_METRIC_X,
+  drawPingBlock(RoundLayout::PING_LEFT_CENTER_X,
                 centerYFromPdf(RoundLayout::PING_VALUE_PDF_Y),
                 routerValid, t.dataValid && !t.routerPingValid,
                 t.routerPingMs, CLR_ROUND_DOWNLOAD);
-  drawPingBlock(RoundLayout::RIGHT_METRIC_X,
+  drawPingBlock(RoundLayout::PING_RIGHT_CENTER_X,
                 centerYFromPdf(RoundLayout::PING_VALUE_PDF_Y),
                 t.dataValid && t.pingValid, t.dataValid && t.pingLoss,
                 t.pingMs, CLR_ROUND_UPLOAD);
