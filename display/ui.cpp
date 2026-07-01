@@ -175,8 +175,63 @@ static void flush() {
   g_canvas->flush();
 }
 
+#if defined(HW_AMOLED_143)
+namespace RoundServiceLayout {
+constexpr int16_t CENTER_X = SCREEN_W / 2;
+
+constexpr int16_t SPLASH_TITLE_CENTER_Y = 214;
+constexpr int16_t SPLASH_DETAIL_CENTER_Y = 252;
+
+constexpr int16_t AP_TITLE_CENTER_Y = 166;
+constexpr int16_t AP_URL_CENTER_Y = 216;
+constexpr int16_t AP_INSTRUCTION_CENTER_Y = 248;
+constexpr int16_t AP_RESET_CENTER_Y = 298;
+
+constexpr int16_t CONNECT_STATUS_CENTER_Y = 214;
+constexpr int16_t CONNECT_SSID_CENTER_Y = 254;
+
+constexpr int16_t RECONNECT_LOST_CENTER_Y = 155;
+constexpr int16_t RECONNECT_RETRY_CENTER_Y = 205;
+constexpr int16_t RECONNECT_SSID_CENTER_Y = 255;
+constexpr int16_t RECONNECT_RESET_CENTER_Y = 305;
+}  // namespace RoundServiceLayout
+
+static int16_t roundServiceTextWidth(const char *text, uint8_t size) {
+  return static_cast<int16_t>(std::strlen(text) * 6U * size);
+}
+
+static int16_t roundServiceTextHeight(uint8_t size) {
+  return static_cast<int16_t>(8U * size);
+}
+
+static int16_t roundServiceTextLeft(const char *text, uint8_t size) {
+  return RoundServiceLayout::CENTER_X -
+         roundServiceTextWidth(text, size) / 2;
+}
+
+static void drawRoundServiceText(const char *text,
+                                 int16_t centerY,
+                                 uint8_t size,
+                                 uint16_t color) {
+  g_canvas->setTextSize(size);
+  g_canvas->setTextColor(color);
+  g_canvas->setCursor(
+      roundServiceTextLeft(text, size),
+      centerY - roundServiceTextHeight(size) / 2);
+  g_canvas->print(text);
+}
+#endif
+
 void uiShowSplash() {
   g_canvas->fillScreen(CLR_BG);
+#if defined(HW_AMOLED_143)
+  drawRoundServiceText("NETMONITOR",
+                       RoundServiceLayout::SPLASH_TITLE_CENTER_Y,
+                       4, CLR_PING);
+  drawRoundServiceText("boot...",
+                       RoundServiceLayout::SPLASH_DETAIL_CENTER_Y,
+                       2, CLR_DIM);
+#else
   g_canvas->setTextSize(4);
   g_canvas->setCursor(80, 90);
   g_canvas->setTextColor(CLR_PING);
@@ -185,6 +240,7 @@ void uiShowSplash() {
   g_canvas->setCursor(180, 140);
   g_canvas->setTextColor(CLR_DIM);
   g_canvas->print("boot...");
+#endif
   flush();
 }
 
@@ -971,6 +1027,33 @@ static void drawSpeedBlock(int16_t zoneX,
 void uiShowApConfig(const char *apName, const char *apIp) {
   g_canvas->fillScreen(CLR_BG);
 
+#if defined(HW_AMOLED_143)
+  const char *safeApName = apName ? apName : "";
+  const char *safeApIp = apIp ? apIp : "";
+
+  char title[48];
+  snprintf(title, sizeof(title), "AP: %s", safeApName);
+  g_canvas->setTextSize(3);
+  g_canvas->setCursor(
+      roundServiceTextLeft(title, 3),
+      RoundServiceLayout::AP_TITLE_CENTER_Y -
+          roundServiceTextHeight(3) / 2);
+  g_canvas->setTextColor(CLR_STATUS_DN);
+  g_canvas->print("AP: ");
+  g_canvas->setTextColor(CLR_TEXT);
+  g_canvas->print(safeApName);
+
+  char url[48];
+  snprintf(url, sizeof(url), "Open http://%s", safeApIp);
+  drawRoundServiceText(url, RoundServiceLayout::AP_URL_CENTER_Y,
+                       2, CLR_DIM);
+  drawRoundServiceText("to configure device",
+                       RoundServiceLayout::AP_INSTRUCTION_CENTER_Y,
+                       2, CLR_DIM);
+  drawRoundServiceText("Hold KEY >3s to reset",
+                       RoundServiceLayout::AP_RESET_CENTER_Y,
+                       2, CLR_PING);
+#else
   g_canvas->setTextSize(3);
   g_canvas->setTextColor(CLR_STATUS_DN);
   g_canvas->setCursor(20, 20);
@@ -991,6 +1074,7 @@ void uiShowApConfig(const char *apName, const char *apIp) {
   g_canvas->setTextColor(CLR_PING);
   g_canvas->setCursor(20, 160);
   g_canvas->print("Hold KEY >3s to reset");
+#endif
   flush();
 }
 
@@ -1010,6 +1094,28 @@ void uiUpdateConnecting() {
 
   g_canvas->fillScreen(CLR_BG);
 
+#if defined(HW_AMOLED_143)
+  constexpr char CONNECTING_TEXT[] = "Connecting ....";
+  g_canvas->setTextSize(3);
+  g_canvas->setTextColor(CLR_TEXT);
+  g_canvas->setCursor(
+      roundServiceTextLeft(CONNECTING_TEXT, 3),
+      RoundServiceLayout::CONNECT_STATUS_CENTER_Y -
+          roundServiceTextHeight(3) / 2);
+  g_canvas->print("Connecting ");
+
+  for (int i = 0; i < 4; i++) {
+    g_canvas->setTextColor(
+      (frame < 4 && i == frame) ? CLR_PING : CLR_DIM);
+    g_canvas->print(".");
+  }
+
+  char ssidLine[48];
+  snprintf(ssidLine, sizeof(ssidLine), "SSID: %s", g_connectSsid);
+  drawRoundServiceText(ssidLine,
+                       RoundServiceLayout::CONNECT_SSID_CENTER_Y,
+                       2, CLR_DIM);
+#else
   g_canvas->setTextSize(3);
   g_canvas->setTextColor(CLR_TEXT);
   g_canvas->setCursor(20, 60);
@@ -1026,12 +1132,34 @@ void uiUpdateConnecting() {
   g_canvas->setCursor(20, 110);
   g_canvas->print("SSID: ");
   g_canvas->print(g_connectSsid);
+#endif
   flush();
 }
 
 void uiShowReconnectWait(const char *ssid, uint32_t remainSec) {
   g_canvas->fillScreen(CLR_BG);
 
+#if defined(HW_AMOLED_143)
+  drawRoundServiceText("Wi-Fi lost",
+                       RoundServiceLayout::RECONNECT_LOST_CENTER_Y,
+                       3, CLR_STATUS_DN);
+
+  char retryLine[32];
+  snprintf(retryLine, sizeof(retryLine), "Retry in %us",
+           static_cast<unsigned>(remainSec));
+  drawRoundServiceText(retryLine,
+                       RoundServiceLayout::RECONNECT_RETRY_CENTER_Y,
+                       3, CLR_TEXT);
+
+  char ssidLine[48];
+  snprintf(ssidLine, sizeof(ssidLine), "SSID: %s", ssid ? ssid : "");
+  drawRoundServiceText(ssidLine,
+                       RoundServiceLayout::RECONNECT_SSID_CENTER_Y,
+                       2, CLR_DIM);
+  drawRoundServiceText("Hold KEY >3s to reset",
+                       RoundServiceLayout::RECONNECT_RESET_CENTER_Y,
+                       2, CLR_DIM);
+#else
   g_canvas->setTextSize(3);
   g_canvas->setTextColor(CLR_STATUS_DN);
   g_canvas->setCursor(20, 50);
@@ -1054,6 +1182,7 @@ void uiShowReconnectWait(const char *ssid, uint32_t remainSec) {
   g_canvas->setTextColor(CLR_DIM);
   g_canvas->setCursor(20, 185);
   g_canvas->print("Hold KEY >3s to reset");
+#endif
   flush();
 }
 
