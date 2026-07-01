@@ -27,7 +27,7 @@ static uint32_t   g_lastTelemetryMs = 0;
 static uint32_t   g_keyDownMs      = 0;
 
 #if defined(HW_AMOLED_143)
-static constexpr uint32_t UI_RUNNING_FRAME_MS = 100;
+static constexpr uint32_t UI_RUNNING_FRAME_MS = UI_ROUND_FRAME_MS;
 #else
 static constexpr uint32_t UI_RUNNING_FRAME_MS = 500;
 #endif

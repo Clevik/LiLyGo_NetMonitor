@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+constexpr uint32_t UI_ROUND_FRAME_MS = 112;
+
 enum class WanConnectionState : uint8_t {
   Unknown,
   Disconnected,

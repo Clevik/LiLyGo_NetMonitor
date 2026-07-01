@@ -353,8 +353,6 @@ static constexpr uint16_t CLR_ROUND_WARN     = rgb565(0xFF, 0xB0, 0x00);
 static constexpr uint16_t CLR_ROUND_ALARM    = rgb565(0xFF, 0x30, 0x30);
 static constexpr uint16_t CLR_ROUND_DIM_BLUE = rgb565(0x00, 0x18, 0x30);
 static constexpr uint16_t CLR_ROUND_DIM_GN   = rgb565(0x00, 0x28, 0x10);
-static constexpr uint16_t CLR_GLOBE_LAND     = rgb565(0x3C, 0xB4, 0x64);
-static constexpr uint16_t CLR_GLOBE_OUTLINE  = rgb565(0x5A, 0xC8, 0xFF);
 
 namespace RoundLayout {
 constexpr int16_t CENTER_X = SCREEN_W / 2;
@@ -426,7 +424,7 @@ constexpr int16_t CENTER_DIVIDER_BOTTOM_PDF_Y = 78;
 constexpr int16_t DEVICE_TITLE_Y = 426;
 constexpr int16_t DEVICE_IP_Y = 452;
 
-constexpr uint16_t GLOBE_FRAME_MS = 168;
+constexpr uint16_t GLOBE_FRAME_MS = UI_ROUND_FRAME_MS;
 
 constexpr int16_t PING_VALUE_Y_OFFSET = -22;
 }  // namespace RoundLayout
@@ -766,21 +764,6 @@ static void drawUpArrow(int16_t x, int16_t y, uint16_t color) {
       x, y - RoundLayout::SPEED_ARROW_HEAD_TIP_OFFSET, color);
 }
 
-static void drawGlobePlane(int16_t x0,
-                           int16_t y0,
-                           uint8_t frame,
-                           const uint16_t *frameOffsets,
-                           const uint16_t *pixels,
-                           uint16_t color) {
-  uint16_t begin = pgm_read_word(&frameOffsets[frame]);
-  uint16_t end = pgm_read_word(&frameOffsets[frame + 1]);
-  for (uint16_t index = begin; index < end; index++) {
-    uint16_t position = pgm_read_word(&pixels[index]);
-    g_canvas->drawPixel(x0 + position % GLOBE_FRAME_W,
-                        y0 + position / GLOBE_FRAME_W, color);
-  }
-}
-
 static void drawGlobeFrame(int16_t centerX, int16_t centerY) {
   uint8_t frame = (millis() / RoundLayout::GLOBE_FRAME_MS) % GLOBE_FRAME_COUNT;
   int16_t x0 = centerX - GLOBE_FRAME_W / 2;
@@ -789,10 +772,19 @@ static void drawGlobeFrame(int16_t centerX, int16_t centerY) {
   g_canvas->fillCircle(centerX, centerY, RoundLayout::GLOBE_RADIUS,
                        rgb565(0x00, 0x06, 0x10));
 
-  drawGlobePlane(x0, y0, frame, GLOBE_LAND_FRAME_OFFSETS,
-                 GLOBE_LAND_PIXELS, CLR_GLOBE_LAND);
-  drawGlobePlane(x0, y0, frame, GLOBE_OUTLINE_FRAME_OFFSETS,
-                 GLOBE_OUTLINE_PIXELS, CLR_GLOBE_OUTLINE);
+  for (uint16_t y = 0; y < GLOBE_FRAME_H; y++) {
+    for (uint16_t byteX = 0; byteX < GLOBE_FRAME_W / 8; byteX++) {
+      uint16_t offset = y * (GLOBE_FRAME_W / 8) + byteX;
+      uint8_t mask = pgm_read_byte(&GLOBE_FRAME_DATA[frame][offset]);
+      if (!mask) continue;
+      for (uint8_t bit = 0; bit < 8; bit++) {
+        if (mask & (0x80 >> bit)) {
+          g_canvas->drawPixel(x0 + byteX * 8 + bit, y0 + y,
+                              CLR_ROUND_UPLOAD);
+        }
+      }
+    }
+  }
 }
 
 static void drawPingBlock(int16_t centerX,
