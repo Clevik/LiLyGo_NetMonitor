@@ -157,7 +157,7 @@ static void formatSpeedText(double bps,
 
   if (!std::isfinite(bps) || bps <= 0.0) {
     snprintf(val, vLen, (style == SpeedFormatStyle::RoundCompact) ? "-" : "0");
-    *unit = (style == SpeedFormatStyle::RoundCompact) ? "Mb" :
+    *unit = (style == SpeedFormatStyle::RoundCompact) ? "Mbps" :
             (style == SpeedFormatStyle::GraphLabel) ? "bt" : "bit";
     return;
   }
@@ -182,13 +182,13 @@ static void formatSpeedText(double bps,
     case SpeedFormatStyle::RoundCompact:
       if (mbps >= 1.0) {
         snprintf(val, vLen, (mbps < 100.0) ? "%.1f" : "%.0f", mbps);
-        *unit = "Mb";
+        *unit = "Mbps";
       } else if (kbps >= 1.0) {
         snprintf(val, vLen, "%.0f", kbps);
-        *unit = "Kb";
+        *unit = "Kbps";
       } else {
         snprintf(val, vLen, "%.0f", bps);
-        *unit = "b";
+        *unit = "bps";
       }
       break;
 
@@ -372,9 +372,9 @@ constexpr float HISTORY_OUT_END_DEG = 50.0f;
 constexpr int16_t LINE_GRAPH_Y = 335;
 constexpr int16_t LINE_GRAPH_H = 97;
 constexpr int16_t LINE_GRAPH_IN_X = 60;
-constexpr int16_t LINE_GRAPH_IN_W = 173;
-constexpr int16_t LINE_GRAPH_OUT_X = 234;
-constexpr int16_t LINE_GRAPH_OUT_W = 172;
+constexpr int16_t LINE_GRAPH_IN_W = 171;
+constexpr int16_t LINE_GRAPH_OUT_X = 236;
+constexpr int16_t LINE_GRAPH_OUT_W = 170;
 
 constexpr int16_t ROUTER_TITLE_Y = 30;
 constexpr uint8_t ROUTER_TITLE_TEXT_SIZE = 2;
@@ -390,6 +390,7 @@ constexpr int16_t SPEED_ZONE_Y = 297;
 // textSize 4 занимает 32 px; ещё по 1 px нужны сверху и снизу для glow.
 constexpr int16_t SPEED_ZONE_H = 34;
 constexpr int16_t SPEED_ZONE_CENTER_Y = 314;
+constexpr int16_t SPEED_VALUE_CENTER_Y = 318;
 constexpr int16_t SPEED_ZONE_W = 174;
 constexpr int16_t SPEED_IN_ZONE_X = 54;
 constexpr int16_t SPEED_OUT_ZONE_X = 238;
@@ -408,7 +409,7 @@ constexpr int16_t PING_ZONE_H = 108;
 constexpr int16_t PING_ICON_TOP_Y = PING_ZONE_Y + 7;
 constexpr int16_t PING_ICON_RADIUS = 22;
 
-constexpr uint8_t SPEED_VALUE_TEXT_SIZE = 4;
+constexpr uint8_t SPEED_VALUE_TEXT_SIZE = 2;
 constexpr uint8_t SPEED_UNIT_TEXT_SIZE = 3;
 constexpr int16_t SPEED_ARROW_SHAFT_W = 5;
 constexpr int16_t SPEED_ARROW_SHAFT_H = 17;
@@ -422,8 +423,8 @@ constexpr int16_t SPEED_VALUE_LEFT_X_OFFSET =
     SPEED_ARROW_HEAD_HALF_W * 2 + 8;
 constexpr int16_t SPEED_VALUE_UNIT_GAP = 6;
 
-constexpr int16_t CENTER_DIVIDER_TOP_PDF_Y = 124;
-constexpr int16_t CENTER_DIVIDER_BOTTOM_PDF_Y = 78;
+constexpr int16_t CENTER_DIVIDER_TOP_Y = 297;
+constexpr int16_t CENTER_DIVIDER_BOTTOM_Y = 431;
 
 constexpr int16_t DEVICE_IP_ZONE_Y = 436;
 constexpr int16_t DEVICE_IP_ZONE_H = 16;
@@ -561,6 +562,16 @@ static float historyMax(const float *data, uint16_t offset, uint16_t count) {
   return maxVal;
 }
 
+static float lineGraphWindowMax(const float *data, int16_t width) {
+  if (!data || g_histCount == 0 || width <= 0) return 1.0f;
+
+  uint16_t samples = g_histCount;
+  if (samples > static_cast<uint16_t>(width)) {
+    samples = static_cast<uint16_t>(width);
+  }
+  return historyMax(data, g_histCount - samples, samples);
+}
+
 static void drawLineGraph(const float *data,
                           int16_t x,
                           int16_t y,
@@ -573,14 +584,18 @@ static void drawLineGraph(const float *data,
   uint16_t samples = g_histCount;
   if (samples > static_cast<uint16_t>(w)) samples = static_cast<uint16_t>(w);
   uint16_t offset = g_histCount - samples;
-  float maxVal = historyMax(data, offset, samples);
+  float maxVal = lineGraphWindowMax(data, w);
+  int16_t graphBottom = y + h - 3;
+  int16_t graphHeight = h - 2;
 
   int16_t prevX = -1;
   int16_t prevY = -1;
   for (uint16_t i = 0; i < samples; i++) {
     uint16_t idx = historyIndexFromOldest(offset + i);
     int16_t px = x + static_cast<int16_t>((static_cast<int32_t>(i) * (w - 1)) / (samples - 1));
-    int16_t py = y + h - 1 - static_cast<int16_t>((data[idx] / maxVal) * (h - 1));
+    int16_t py =
+        graphBottom -
+        static_cast<int16_t>((data[idx] / maxVal) * (graphHeight - 1));
     if (prevX >= 0) {
       g_canvas->drawLine(prevX, prevY + 2, px, py + 2, glowColor);
       g_canvas->drawLine(prevX, prevY + 1, px, py + 1, glowColor);
@@ -589,6 +604,30 @@ static void drawLineGraph(const float *data,
     prevX = px;
     prevY = py;
   }
+}
+
+static void drawGraphMaxPill(float bps, int16_t x, int16_t y) {
+  constexpr uint16_t CLR_LABEL_BG = 0x39E7;
+  constexpr int16_t PAD = 4;
+  constexpr int16_t RAD = 3;
+  constexpr int16_t CH_W = 12;
+  constexpr int16_t CH_H = 16;
+
+  char value[16];
+  const char *unit = "bt";
+  formatSpeedText(bps, SpeedFormatStyle::GraphLabel, value, sizeof(value),
+                  &unit);
+
+  int textLen = std::strlen(value) + 1 + std::strlen(unit);
+  int16_t width = textLen * CH_W + PAD * 2;
+  int16_t height = CH_H + PAD * 2;
+  g_canvas->fillRoundRect(x, y, width, height, RAD, CLR_LABEL_BG);
+  g_canvas->setTextSize(2);
+  g_canvas->setTextColor(CLR_TEXT, CLR_LABEL_BG);
+  g_canvas->setCursor(x + PAD, y + PAD);
+  g_canvas->print(value);
+  g_canvas->print(" ");
+  g_canvas->print(unit);
 }
 
 static void drawArcSegment(int16_t cx,
@@ -796,7 +835,7 @@ static void drawSpeedBlock(int16_t zoneX,
                            double bps) {
   uint16_t color = upload ? CLR_ROUND_UPLOAD : CLR_ROUND_DOWNLOAD;
   char value[16];
-  const char *unit = "Mb";
+  const char *unit = "Mbps";
   formatSpeedText(bps, SpeedFormatStyle::RoundCompact, value, sizeof(value),
                   &unit);
 
@@ -814,7 +853,8 @@ static void drawSpeedBlock(int16_t zoneX,
   } else {
     drawDownArrow(arrowX, centerY, color);
   }
-  drawTextCenteredGlow(value, valueLeft + valueW / 2, centerY,
+  drawTextCenteredGlow(value, valueLeft + valueW / 2,
+                       RoundLayout::SPEED_VALUE_CENTER_Y,
                        RoundLayout::SPEED_VALUE_TEXT_SIZE, CLR_TEXT,
                        upload ? CLR_ROUND_DIM_BLUE : CLR_ROUND_DIM_GN);
   drawTextCentered(unit, unitLeft + unitW / 2, centerY,
@@ -939,6 +979,14 @@ static void uiShowMainRound(const Telemetry &t) {
                 RoundLayout::LINE_GRAPH_Y,
                 RoundLayout::LINE_GRAPH_OUT_W, RoundLayout::LINE_GRAPH_H,
                 CLR_ROUND_UPLOAD, CLR_ROUND_DIM_BLUE);
+  if (g_histCount >= 2) {
+    drawGraphMaxPill(
+        lineGraphWindowMax(g_histIn, RoundLayout::LINE_GRAPH_IN_W),
+        RoundLayout::LINE_GRAPH_IN_X + 4, RoundLayout::LINE_GRAPH_Y + 2);
+    drawGraphMaxPill(
+        lineGraphWindowMax(g_histOut, RoundLayout::LINE_GRAPH_OUT_W),
+        RoundLayout::LINE_GRAPH_OUT_X + 4, RoundLayout::LINE_GRAPH_Y + 2);
+  }
 
   drawGlobeFrame(RoundLayout::CENTER_X, RoundLayout::GLOBE_CENTER_Y);
 
@@ -977,9 +1025,9 @@ static void uiShowMainRound(const Telemetry &t) {
                 t.pingMs, CLR_ROUND_UPLOAD);
 
   g_canvas->drawLine(RoundLayout::CENTER_X,
-                     centerYFromPdf(RoundLayout::CENTER_DIVIDER_TOP_PDF_Y),
+                     RoundLayout::CENTER_DIVIDER_TOP_Y,
                      RoundLayout::CENTER_X,
-                     centerYFromPdf(RoundLayout::CENTER_DIVIDER_BOTTOM_PDF_Y),
+                     RoundLayout::CENTER_DIVIDER_BOTTOM_Y,
                      rgb565(0x80, 0x80, 0x80));
   drawSpeedBlock(RoundLayout::SPEED_IN_ZONE_X, false, t.inBps);
   drawSpeedBlock(RoundLayout::SPEED_OUT_ZONE_X, true, t.outBps);
