@@ -369,12 +369,12 @@ constexpr float HISTORY_IN_END_DEG = 180.0f + HISTORY_ARC_SPEED_LIMIT_DEG;
 constexpr float HISTORY_OUT_START_DEG = -HISTORY_ARC_SPEED_LIMIT_DEG;
 constexpr float HISTORY_OUT_END_DEG = 50.0f;
 
-constexpr int16_t LINE_GRAPH_X = 60;
-constexpr int16_t LINE_GRAPH_W = 346;
-constexpr int16_t LINE_GRAPH_IN_PDF_Y = 72;
-constexpr int16_t LINE_GRAPH_IN_H = 28;
-constexpr int16_t LINE_GRAPH_OUT_PDF_Y = 35;
-constexpr int16_t LINE_GRAPH_OUT_H = 24;
+constexpr int16_t LINE_GRAPH_Y = 335;
+constexpr int16_t LINE_GRAPH_H = 97;
+constexpr int16_t LINE_GRAPH_IN_X = 60;
+constexpr int16_t LINE_GRAPH_IN_W = 173;
+constexpr int16_t LINE_GRAPH_OUT_X = 234;
+constexpr int16_t LINE_GRAPH_OUT_W = 172;
 
 constexpr int16_t ROUTER_TITLE_Y = 30;
 constexpr uint8_t ROUTER_TITLE_TEXT_SIZE = 2;
@@ -503,27 +503,8 @@ static void drawRoundDebugZone(const RoundDebugZone &zone) {
 }
 
 static void drawRoundDebugZones() {
-  static constexpr uint16_t CLR_DEBUG_TOP = rgb565(0xFF, 0xE0, 0x00);
-  static constexpr uint16_t CLR_DEBUG_LEFT = rgb565(0x00, 0xFF, 0x80);
-  static constexpr uint16_t CLR_DEBUG_RIGHT = rgb565(0x40, 0xB0, 0xFF);
-  static constexpr uint16_t CLR_DEBUG_BOTTOM = rgb565(0xFF, 0x80, 0x00);
-
   static constexpr RoundDebugZone zones[] = {
       {"SCREEN", 0, 0, SCREEN_W, SCREEN_H, CLR_DIM},
-      {"SPEED_L", RoundLayout::SPEED_IN_ZONE_X, RoundLayout::SPEED_ZONE_Y,
-       RoundLayout::SPEED_ZONE_W, RoundLayout::SPEED_ZONE_H, CLR_DEBUG_LEFT},
-      {"SPEED_R", RoundLayout::SPEED_OUT_ZONE_X, RoundLayout::SPEED_ZONE_Y,
-       RoundLayout::SPEED_ZONE_W, RoundLayout::SPEED_ZONE_H, CLR_DEBUG_RIGHT},
-      {"GRAPH_IN", RoundLayout::LINE_GRAPH_X,
-       centerYFromPdf(RoundLayout::LINE_GRAPH_IN_PDF_Y) -
-           RoundLayout::LINE_GRAPH_IN_H,
-       RoundLayout::LINE_GRAPH_W, RoundLayout::LINE_GRAPH_IN_H,
-       CLR_DEBUG_BOTTOM},
-      {"GRAPH_OUT", RoundLayout::LINE_GRAPH_X,
-       centerYFromPdf(RoundLayout::LINE_GRAPH_OUT_PDF_Y) -
-           RoundLayout::LINE_GRAPH_OUT_H,
-       RoundLayout::LINE_GRAPH_W, RoundLayout::LINE_GRAPH_OUT_H,
-       CLR_DEBUG_BOTTOM},
   };
 
   for (const RoundDebugZone &zone : zones) {
@@ -950,15 +931,13 @@ static void uiShowMainRound(const Telemetry &t) {
                  RoundLayout::HISTORY_OUT_END_DEG, CLR_ROUND_UPLOAD,
                  CLR_ROUND_DIM_BLUE);
 
-  drawLineGraph(g_histIn, RoundLayout::LINE_GRAPH_X,
-                centerYFromPdf(RoundLayout::LINE_GRAPH_IN_PDF_Y) -
-                    RoundLayout::LINE_GRAPH_IN_H,
-                RoundLayout::LINE_GRAPH_W, RoundLayout::LINE_GRAPH_IN_H,
+  drawLineGraph(g_histIn, RoundLayout::LINE_GRAPH_IN_X,
+                RoundLayout::LINE_GRAPH_Y,
+                RoundLayout::LINE_GRAPH_IN_W, RoundLayout::LINE_GRAPH_H,
                 CLR_ROUND_DOWNLOAD, CLR_ROUND_DIM_GN);
-  drawLineGraph(g_histOut, RoundLayout::LINE_GRAPH_X,
-                centerYFromPdf(RoundLayout::LINE_GRAPH_OUT_PDF_Y) -
-                    RoundLayout::LINE_GRAPH_OUT_H,
-                RoundLayout::LINE_GRAPH_W, RoundLayout::LINE_GRAPH_OUT_H,
+  drawLineGraph(g_histOut, RoundLayout::LINE_GRAPH_OUT_X,
+                RoundLayout::LINE_GRAPH_Y,
+                RoundLayout::LINE_GRAPH_OUT_W, RoundLayout::LINE_GRAPH_H,
                 CLR_ROUND_UPLOAD, CLR_ROUND_DIM_BLUE);
 
   drawGlobeFrame(RoundLayout::CENTER_X, RoundLayout::GLOBE_CENTER_Y);
