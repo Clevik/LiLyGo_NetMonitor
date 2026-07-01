@@ -419,8 +419,8 @@ constexpr float HISTORY_OUT_END_DEG = -HISTORY_ARC_BOTTOM_ANGLE_DEG;
 constexpr int16_t HISTORY_ARC_MIN_BAR_LEN = 2;
 constexpr int16_t HISTORY_ARC_MAX_BAR_LEN = 28;
 
-constexpr int16_t LINE_GRAPH_Y = 335;
-constexpr int16_t LINE_GRAPH_H = 97;
+constexpr int16_t LINE_GRAPH_Y = 343;
+constexpr int16_t LINE_GRAPH_H = 89;
 constexpr int16_t LINE_GRAPH_IN_X = 60;
 constexpr int16_t LINE_GRAPH_IN_W = 169;
 constexpr int16_t LINE_GRAPH_OUT_X = 238;
