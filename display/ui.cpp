@@ -53,6 +53,7 @@ constexpr uint16_t PING_ARC_POINTS = 60;
 enum class PingArcSampleState : uint8_t {
   Success,
   Loss,
+  Unavailable,
 };
 
 static uint32_t g_routerPingHistory[PING_ARC_POINTS] = {};
@@ -127,7 +128,8 @@ static void pushPingHistory(const Telemetry &t) {
   } else {
     g_externalPingHistory[g_pingHistHead] = 0;
     g_externalPingState[g_pingHistHead] =
-        t.pingLoss ? PingArcSampleState::Loss : PingArcSampleState::Success;
+        t.pingLoss ? PingArcSampleState::Loss
+                   : PingArcSampleState::Unavailable;
   }
 
   g_pingHistHead = (g_pingHistHead + 1) % PING_ARC_POINTS;
@@ -516,9 +518,11 @@ constexpr int16_t PING_ZONE_RIGHT_X = CENTER_X + GLOBE_RADIUS + 1;
 constexpr int16_t PING_LEFT_CENTER_X = PING_ZONE_LEFT_X + PING_ZONE_W / 2;
 constexpr int16_t PING_RIGHT_CENTER_X = PING_ZONE_RIGHT_X + PING_ZONE_W / 2;
 constexpr int16_t PING_ZONE_Y = 155;
-constexpr int16_t PING_ZONE_H = 108;
+constexpr int16_t PING_ZONE_H = 116;
 constexpr int16_t PING_ICON_TOP_Y = PING_ZONE_Y + 7;
 constexpr int16_t PING_ICON_RADIUS = 22;
+constexpr uint8_t PING_STATS_TEXT_SIZE = ROUTER_TITLE_TEXT_SIZE;
+constexpr int16_t PING_STATS_CENTER_Y = 262;
 
 constexpr uint8_t SPEED_VALUE_TEXT_SIZE = 4;
 constexpr uint8_t SPEED_UNIT_TEXT_SIZE = 2;
@@ -797,6 +801,33 @@ static uint32_t pingHistoryMax(const uint32_t *values,
   return maxValue;
 }
 
+struct PingHistoryRange {
+  bool valid;
+  uint32_t minValue;
+  uint32_t maxValue;
+};
+
+static PingHistoryRange pingHistoryRange(
+    const uint32_t *values,
+    const PingArcSampleState *states) {
+  PingHistoryRange range = {false, 0, 0};
+  for (uint16_t i = 0; i < g_pingHistCount; i++) {
+    uint16_t idx = pingHistoryIndexFromOldest(i);
+    if (states[idx] != PingArcSampleState::Success) continue;
+
+    uint32_t value = values[idx];
+    if (!range.valid) {
+      range.valid = true;
+      range.minValue = value;
+      range.maxValue = value;
+      continue;
+    }
+    if (value < range.minValue) range.minValue = value;
+    if (value > range.maxValue) range.maxValue = value;
+  }
+  return range;
+}
+
 static void drawPingHistoryArc(const uint32_t *values,
                                const PingArcSampleState *states,
                                float startDeg,
@@ -995,21 +1026,34 @@ static void drawPingBlock(int16_t centerX,
                           bool valid,
                           bool loss,
                           uint32_t ms,
-                          uint16_t color) {
+                          uint16_t color,
+                          const uint32_t *history,
+                          const PingArcSampleState *historyStates) {
   if (loss || !valid) {
     drawTextCentered(loss ? "loss" : "--", centerX,
                      valueY + RoundLayout::PING_VALUE_Y_OFFSET,
                      RoundLayout::PING_VALUE_TEXT_SIZE,
                      loss ? CLR_ROUND_ALARM : CLR_DIM);
-    return;
+  } else {
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(ms));
+    drawTextCenteredGlow(buf, centerX,
+                         valueY + RoundLayout::PING_VALUE_Y_OFFSET,
+                         RoundLayout::PING_VALUE_TEXT_SIZE,
+                         color, CLR_ROUND_DIM_BLUE);
   }
 
-  char buf[12];
-  snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(ms));
-  drawTextCenteredGlow(buf, centerX,
-                       valueY + RoundLayout::PING_VALUE_Y_OFFSET,
-                       RoundLayout::PING_VALUE_TEXT_SIZE,
-                       color, CLR_ROUND_DIM_BLUE);
+  PingHistoryRange range = pingHistoryRange(history, historyStates);
+  char stats[28];
+  if (range.valid) {
+    snprintf(stats, sizeof(stats), "%u/%u",
+             static_cast<unsigned>(range.minValue),
+             static_cast<unsigned>(range.maxValue));
+  } else {
+    snprintf(stats, sizeof(stats), "-/-");
+  }
+  drawTextCentered(stats, centerX, RoundLayout::PING_STATS_CENTER_Y,
+                   RoundLayout::PING_STATS_TEXT_SIZE, CLR_TEXT);
 }
 
 static void drawSpeedBlock(int16_t zoneX,
@@ -1275,11 +1319,13 @@ static void uiShowMainRound(const Telemetry &t) {
   drawPingBlock(RoundLayout::PING_LEFT_CENTER_X,
                 centerYFromPdf(RoundLayout::PING_VALUE_PDF_Y),
                 routerValid, t.dataValid && !t.routerPingValid,
-                t.routerPingMs, CLR_ROUND_DOWNLOAD);
+                t.routerPingMs, CLR_ROUND_DOWNLOAD,
+                g_routerPingHistory, g_routerPingState);
   drawPingBlock(RoundLayout::PING_RIGHT_CENTER_X,
                 centerYFromPdf(RoundLayout::PING_VALUE_PDF_Y),
                 t.dataValid && t.pingValid, t.dataValid && t.pingLoss,
-                t.pingMs, CLR_ROUND_UPLOAD);
+                t.pingMs, CLR_ROUND_UPLOAD,
+                g_externalPingHistory, g_externalPingState);
 
   g_canvas->drawLine(RoundLayout::CENTER_X,
                      RoundLayout::CENTER_DIVIDER_TOP_Y,
