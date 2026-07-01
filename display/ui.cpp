@@ -26,9 +26,14 @@ static uint8_t g_brightnessIdx = 0;
 static bool g_redrawRequested = false;
 
 #if defined(HW_AMOLED_143)
+static constexpr uint8_t GLOBE_REST_FRAME_INDEX = 4;
+static constexpr uint32_t GLOBE_REST_DURATION_MS = 15000;
+static_assert(GLOBE_REST_FRAME_INDEX < GLOBE_FRAME_COUNT);
+
 static bool g_globeAnimationRunning = true;
-static uint8_t g_globeFrame = 0;
+static uint8_t g_globeFrame = GLOBE_REST_FRAME_INDEX;
 static uint32_t g_lastGlobeFrameMs = 0;
+static uint32_t g_globeRestUntilMs = 0;
 #endif
 
 #define DISP_CMD_BRIGHTNESS 0x51
@@ -939,13 +944,28 @@ static void drawGlobeFrame(int16_t centerX, int16_t centerY) {
   if (g_lastGlobeFrameMs == 0) {
     g_lastGlobeFrameMs = now;
   }
+
   if (g_globeAnimationRunning) {
-    uint32_t elapsed = now - g_lastGlobeFrameMs;
-    if (elapsed >= RoundLayout::GLOBE_FRAME_MS) {
+    if (g_globeRestUntilMs != 0) {
+      if (static_cast<int32_t>(now - g_globeRestUntilMs) >= 0) {
+        g_globeRestUntilMs = 0;
+        g_lastGlobeFrameMs = now;
+      }
+    } else {
+      uint32_t elapsed = now - g_lastGlobeFrameMs;
       uint32_t steps = elapsed / RoundLayout::GLOBE_FRAME_MS;
-      g_globeFrame =
-          (g_globeFrame + steps) % static_cast<uint8_t>(GLOBE_FRAME_COUNT);
-      g_lastGlobeFrameMs += steps * RoundLayout::GLOBE_FRAME_MS;
+      while (steps > 0) {
+        g_lastGlobeFrameMs += RoundLayout::GLOBE_FRAME_MS;
+        g_globeFrame =
+            (g_globeFrame + 1) % static_cast<uint8_t>(GLOBE_FRAME_COUNT);
+        steps--;
+
+        if (g_globeFrame == GLOBE_REST_FRAME_INDEX) {
+          g_globeRestUntilMs = now + GLOBE_REST_DURATION_MS;
+          g_lastGlobeFrameMs = now;
+          break;
+        }
+      }
     }
   }
 
@@ -1575,7 +1595,11 @@ void uiHandleTap(int16_t x, int16_t y) {
 
   if (distanceSquared <= radiusSquared) {
     g_globeAnimationRunning = !g_globeAnimationRunning;
-    g_lastGlobeFrameMs = millis();
+    uint32_t now = millis();
+    g_lastGlobeFrameMs = now;
+    if (g_globeAnimationRunning && g_globeRestUntilMs != 0) {
+      g_globeRestUntilMs = now + GLOBE_REST_DURATION_MS;
+    }
     g_redrawRequested = true;
     Serial.printf("[UI] globe animation -> %s\n",
                   g_globeAnimationRunning ? "running" : "paused");
