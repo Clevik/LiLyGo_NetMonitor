@@ -110,12 +110,23 @@ void setup() {
   }
 
   pinMode(PIN_KEY, INPUT_PULLUP);
+
+#if !defined(HW_AMOLED_143)
   touchInit();
+#endif
 
   if (!uiInit()) {
     Serial.println("[UI] display init failed, halting");
     while (true) delay(1000);
   }
+
+#if defined(HW_AMOLED_143)
+  delay(50);
+  if (!touchInit()) {
+    Serial.println("[Touch] initialization failed");
+  }
+#endif
+
   uiShowSplash();
   delay(1500);
 
@@ -215,9 +226,19 @@ void loop() {
         break;
       }
 
+#if defined(HW_AMOLED_143)
+      {
+        int16_t touchX = 0;
+        int16_t touchY = 0;
+        if (touchReadTap(touchX, touchY)) {
+          uiHandleTap(touchX, touchY);
+        }
+      }
+#else
       if (touchButtonPressed()) {
         uiCycleBrightness();
       }
+#endif
 
       bool redrawRequested = uiConsumeRedrawRequest();
       if (g_lastTelemetryMs == 0 || now - g_lastTelemetryMs >= TELEMETRY_SNAPSHOT_MS) {

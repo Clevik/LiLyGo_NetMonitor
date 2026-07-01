@@ -25,6 +25,12 @@ static constexpr uint8_t BRIGHTNESS_COUNT = 5;
 static uint8_t g_brightnessIdx = 0;
 static bool g_redrawRequested = false;
 
+#if defined(HW_AMOLED_143)
+static bool g_globeAnimationRunning = true;
+static uint8_t g_globeFrame = 0;
+static uint32_t g_lastGlobeFrameMs = 0;
+#endif
+
 #define DISP_CMD_BRIGHTNESS 0x51
 #define DISP_CMD_DISPON     0x29
 #define DISP_CMD_DISPOFF    0x28
@@ -35,6 +41,22 @@ static float g_histOut[GRAPH_POINTS] = {};
 static uint16_t g_histCount = 0;
 static uint16_t g_histHead  = 0;
 static uint32_t g_lastHistMs = 0;
+
+#if defined(HW_AMOLED_143)
+constexpr uint16_t PING_ARC_POINTS = 60;
+
+enum class PingArcSampleState : uint8_t {
+  Success,
+  Loss,
+};
+
+static uint32_t g_routerPingHistory[PING_ARC_POINTS] = {};
+static uint32_t g_externalPingHistory[PING_ARC_POINTS] = {};
+static PingArcSampleState g_routerPingState[PING_ARC_POINTS] = {};
+static PingArcSampleState g_externalPingState[PING_ARC_POINTS] = {};
+static uint16_t g_pingHistCount = 0;
+static uint16_t g_pingHistHead = 0;
+#endif
 
 static void logMemoryState(const char *stage) {
   Serial.printf(
@@ -83,6 +105,30 @@ static void pushHistory(float inBps, float outBps) {
   g_histHead = (g_histHead + 1) % GRAPH_POINTS;
   if (g_histCount < GRAPH_POINTS) g_histCount++;
 }
+
+#if defined(HW_AMOLED_143)
+static void pushPingHistory(const Telemetry &t) {
+  if (t.routerPingValid) {
+    g_routerPingHistory[g_pingHistHead] = t.routerPingMs;
+    g_routerPingState[g_pingHistHead] = PingArcSampleState::Success;
+  } else {
+    g_routerPingHistory[g_pingHistHead] = 0;
+    g_routerPingState[g_pingHistHead] = PingArcSampleState::Loss;
+  }
+
+  if (t.pingValid && !t.pingLoss) {
+    g_externalPingHistory[g_pingHistHead] = t.pingMs;
+    g_externalPingState[g_pingHistHead] = PingArcSampleState::Success;
+  } else {
+    g_externalPingHistory[g_pingHistHead] = 0;
+    g_externalPingState[g_pingHistHead] =
+        t.pingLoss ? PingArcSampleState::Loss : PingArcSampleState::Success;
+  }
+
+  g_pingHistHead = (g_pingHistHead + 1) % PING_ARC_POINTS;
+  if (g_pingHistCount < PING_ARC_POINTS) g_pingHistCount++;
+}
+#endif
 
 bool uiInit() {
   Serial.printf("[UI] canvas need: %ux%u RGB565 = %u bytes\n",
@@ -276,6 +322,9 @@ static void updateTrafficHistory(const Telemetry &t) {
   if (now - g_lastHistMs >= 1000) {
     g_lastHistMs = now;
     pushHistory((float)t.inBps, (float)t.outBps);
+#if defined(HW_AMOLED_143)
+    pushPingHistory(t);
+#endif
   }
 }
 
@@ -362,19 +411,20 @@ constexpr int16_t OUTER_RING_RADIUS = 228;
 constexpr int16_t INNER_RING_RADIUS = 223;
 
 constexpr int16_t HISTORY_ARC_RADIUS = 205;
-constexpr uint16_t HISTORY_ARC_MAX_SAMPLES = 60;
-constexpr float HISTORY_ARC_SPEED_LIMIT_DEG = 20.0f;
+constexpr float HISTORY_ARC_BOTTOM_ANGLE_DEG = 18.0f;
 constexpr float HISTORY_IN_START_DEG = 130.0f;
-constexpr float HISTORY_IN_END_DEG = 180.0f + HISTORY_ARC_SPEED_LIMIT_DEG;
-constexpr float HISTORY_OUT_START_DEG = -HISTORY_ARC_SPEED_LIMIT_DEG;
-constexpr float HISTORY_OUT_END_DEG = 50.0f;
+constexpr float HISTORY_IN_END_DEG = 180.0f + HISTORY_ARC_BOTTOM_ANGLE_DEG;
+constexpr float HISTORY_OUT_START_DEG = 50.0f;
+constexpr float HISTORY_OUT_END_DEG = -HISTORY_ARC_BOTTOM_ANGLE_DEG;
+constexpr int16_t HISTORY_ARC_MIN_BAR_LEN = 2;
+constexpr int16_t HISTORY_ARC_MAX_BAR_LEN = 28;
 
 constexpr int16_t LINE_GRAPH_Y = 335;
 constexpr int16_t LINE_GRAPH_H = 97;
 constexpr int16_t LINE_GRAPH_IN_X = 60;
-constexpr int16_t LINE_GRAPH_IN_W = 171;
-constexpr int16_t LINE_GRAPH_OUT_X = 236;
-constexpr int16_t LINE_GRAPH_OUT_W = 170;
+constexpr int16_t LINE_GRAPH_IN_W = 169;
+constexpr int16_t LINE_GRAPH_OUT_X = 238;
+constexpr int16_t LINE_GRAPH_OUT_W = 168;
 
 constexpr int16_t ROUTER_TITLE_Y = 30;
 constexpr uint8_t ROUTER_TITLE_TEXT_SIZE = 2;
@@ -641,9 +691,8 @@ static void drawArcSegment(int16_t cx,
   int16_t prevX = 0;
   int16_t prevY = 0;
   bool havePrev = false;
-  float step = (endDeg >= startDeg) ? 4.0f : -4.0f;
-  for (float a = startDeg; (step > 0.0f) ? (a <= endDeg) : (a >= endDeg); a += step) {
-    float rad = a * DEG;
+  auto appendPoint = [&](float angleDeg) {
+    float rad = angleDeg * DEG;
     int16_t px = cx + static_cast<int16_t>(cosf(rad) * radius);
     int16_t py = cy - static_cast<int16_t>(sinf(rad) * radius);
     if (havePrev) {
@@ -654,38 +703,82 @@ static void drawArcSegment(int16_t cx,
     prevX = px;
     prevY = py;
     havePrev = true;
+  };
+
+  float step = (endDeg >= startDeg) ? 4.0f : -4.0f;
+  for (float angle = startDeg;
+       (step > 0.0f) ? (angle <= endDeg) : (angle >= endDeg);
+       angle += step) {
+    appendPoint(angle);
   }
+  appendPoint(endDeg);
 }
 
-static void drawHistoryArc(const float *data,
-                           float startDeg,
-                           float endDeg,
-                           uint16_t color,
-                           uint16_t dimColor) {
+static uint16_t pingHistoryStartIndex() {
+  return (g_pingHistHead + PING_ARC_POINTS - g_pingHistCount) %
+         PING_ARC_POINTS;
+}
+
+static uint16_t pingHistoryIndexFromOldest(uint16_t offset) {
+  return (pingHistoryStartIndex() + offset) % PING_ARC_POINTS;
+}
+
+static uint32_t pingHistoryMax(const uint32_t *values,
+                               const PingArcSampleState *states) {
+  uint32_t maxValue = 1;
+  for (uint16_t i = 0; i < g_pingHistCount; i++) {
+    uint16_t idx = pingHistoryIndexFromOldest(i);
+    if (states[idx] == PingArcSampleState::Success &&
+        values[idx] > maxValue) {
+      maxValue = values[idx];
+    }
+  }
+  return maxValue;
+}
+
+static void drawPingHistoryArc(const uint32_t *values,
+                               const PingArcSampleState *states,
+                               float startDeg,
+                               float endDeg,
+                               uint16_t color,
+                               uint16_t dimColor) {
   static constexpr float DEG = 3.1415926535f / 180.0f;
 
   drawArcSegment(RoundLayout::CENTER_X, RoundLayout::CENTER_Y,
                  RoundLayout::HISTORY_ARC_RADIUS, startDeg, endDeg,
                  dimColor, 2);
 
-  if (g_histCount < 2) return;
+  uint32_t maxValue = pingHistoryMax(values, states);
+  uint16_t emptySlots = PING_ARC_POINTS - g_pingHistCount;
 
-  uint16_t samples = g_histCount;
-  if (samples > RoundLayout::HISTORY_ARC_MAX_SAMPLES) {
-    samples = RoundLayout::HISTORY_ARC_MAX_SAMPLES;
-  }
-  uint16_t offset = g_histCount - samples;
-  float maxVal = historyMax(data, offset, samples);
+  for (uint16_t i = 0; i < PING_ARC_POINTS; i++) {
+    PingArcSampleState state = PingArcSampleState::Success;
+    uint32_t value = 0;
+    bool filled = i >= emptySlots;
+    if (filled) {
+      uint16_t idx = pingHistoryIndexFromOldest(i - emptySlots);
+      state = states[idx];
+      value = values[idx];
+    }
 
-  for (uint16_t i = 0; i < samples; i++) {
-    uint16_t idx = historyIndexFromOldest(offset + i);
-    float pos = (samples <= 1) ? 0.0f : (float)i / (float)(samples - 1);
+    float pos = static_cast<float>(i) /
+                static_cast<float>(PING_ARC_POINTS - 1);
     float angle = startDeg + (endDeg - startDeg) * pos;
-    float norm = data[idx] / maxVal;
-    if (norm < 0.04f) norm = 0.04f;
-    if (norm > 1.0f) norm = 1.0f;
+    int16_t length = RoundLayout::HISTORY_ARC_MIN_BAR_LEN;
+    uint16_t barColor = color;
 
-    int16_t len = 4 + static_cast<int16_t>(norm * 24.0f);
+    if (filled && state == PingArcSampleState::Success) {
+      float norm = static_cast<float>(value) /
+                   static_cast<float>(maxValue);
+      if (norm > 1.0f) norm = 1.0f;
+      length += static_cast<int16_t>(
+          norm * (RoundLayout::HISTORY_ARC_MAX_BAR_LEN -
+                  RoundLayout::HISTORY_ARC_MIN_BAR_LEN));
+      barColor = color;
+    } else if (state == PingArcSampleState::Loss) {
+      barColor = CLR_ROUND_ALARM;
+    }
+
     float rad = angle * DEG;
     int16_t x0 = RoundLayout::CENTER_X +
                  static_cast<int16_t>(cosf(rad) * (RoundLayout::HISTORY_ARC_RADIUS + 2));
@@ -693,12 +786,12 @@ static void drawHistoryArc(const float *data,
                  static_cast<int16_t>(sinf(rad) * (RoundLayout::HISTORY_ARC_RADIUS + 2));
     int16_t x1 = RoundLayout::CENTER_X +
                  static_cast<int16_t>(cosf(rad) *
-                                      (RoundLayout::HISTORY_ARC_RADIUS + 2 - len));
+                                      (RoundLayout::HISTORY_ARC_RADIUS + 2 - length));
     int16_t y1 = RoundLayout::CENTER_Y -
                  static_cast<int16_t>(sinf(rad) *
-                                      (RoundLayout::HISTORY_ARC_RADIUS + 2 - len));
-    g_canvas->drawLine(x0, y0, x1, y1, color);
-    g_canvas->drawLine(x0, y0 + 1, x1, y1 + 1, color);
+                                      (RoundLayout::HISTORY_ARC_RADIUS + 2 - length));
+    g_canvas->drawLine(x0, y0, x1, y1, barColor);
+    g_canvas->drawLine(x0, y0 + 1, x1, y1 + 1, barColor);
   }
 }
 
@@ -786,7 +879,20 @@ static void drawUpArrow(int16_t x, int16_t y, uint16_t color) {
 }
 
 static void drawGlobeFrame(int16_t centerX, int16_t centerY) {
-  uint8_t frame = (millis() / RoundLayout::GLOBE_FRAME_MS) % GLOBE_FRAME_COUNT;
+  uint32_t now = millis();
+  if (g_lastGlobeFrameMs == 0) {
+    g_lastGlobeFrameMs = now;
+  }
+  if (g_globeAnimationRunning) {
+    uint32_t elapsed = now - g_lastGlobeFrameMs;
+    if (elapsed >= RoundLayout::GLOBE_FRAME_MS) {
+      uint32_t steps = elapsed / RoundLayout::GLOBE_FRAME_MS;
+      g_globeFrame =
+          (g_globeFrame + steps) % static_cast<uint8_t>(GLOBE_FRAME_COUNT);
+      g_lastGlobeFrameMs += steps * RoundLayout::GLOBE_FRAME_MS;
+    }
+  }
+
   int16_t x0 = centerX - GLOBE_FRAME_W / 2;
   int16_t y0 = centerY - GLOBE_FRAME_H / 2;
 
@@ -796,7 +902,7 @@ static void drawGlobeFrame(int16_t centerX, int16_t centerY) {
   for (uint16_t y = 0; y < GLOBE_FRAME_H; y++) {
     for (uint16_t byteX = 0; byteX < GLOBE_FRAME_W / 8; byteX++) {
       uint16_t offset = y * (GLOBE_FRAME_W / 8) + byteX;
-      uint8_t mask = pgm_read_byte(&GLOBE_FRAME_DATA[frame][offset]);
+      uint8_t mask = pgm_read_byte(&GLOBE_FRAME_DATA[g_globeFrame][offset]);
       if (!mask) continue;
       for (uint8_t bit = 0; bit < 8; bit++) {
         if (mask & (0x80 >> bit)) {
@@ -964,12 +1070,14 @@ static void uiShowMainRound(const Telemetry &t) {
                        RoundLayout::INNER_RING_RADIUS,
                        rgb565(0x11, 0x16, 0x1C));
 
-  drawHistoryArc(g_histIn, RoundLayout::HISTORY_IN_START_DEG,
-                 RoundLayout::HISTORY_IN_END_DEG, CLR_ROUND_DOWNLOAD,
-                 CLR_ROUND_DIM_GN);
-  drawHistoryArc(g_histOut, RoundLayout::HISTORY_OUT_START_DEG,
-                 RoundLayout::HISTORY_OUT_END_DEG, CLR_ROUND_UPLOAD,
-                 CLR_ROUND_DIM_BLUE);
+  drawPingHistoryArc(g_routerPingHistory, g_routerPingState,
+                     RoundLayout::HISTORY_IN_START_DEG,
+                     RoundLayout::HISTORY_IN_END_DEG,
+                     CLR_ROUND_DOWNLOAD, CLR_ROUND_DIM_GN);
+  drawPingHistoryArc(g_externalPingHistory, g_externalPingState,
+                     RoundLayout::HISTORY_OUT_START_DEG,
+                     RoundLayout::HISTORY_OUT_END_DEG,
+                     CLR_ROUND_UPLOAD, CLR_ROUND_DIM_BLUE);
 
   drawLineGraph(g_histIn, RoundLayout::LINE_GRAPH_IN_X,
                 RoundLayout::LINE_GRAPH_Y,
@@ -1326,6 +1434,28 @@ void uiShowMain(const Telemetry &t) {
   uiShowMainRect(t);
 #endif
 }
+
+#if defined(HW_AMOLED_143)
+void uiHandleTap(int16_t x, int16_t y) {
+  int32_t dx = static_cast<int32_t>(x) - RoundLayout::CENTER_X;
+  int32_t dy = static_cast<int32_t>(y) - RoundLayout::GLOBE_CENTER_Y;
+  int32_t distanceSquared = dx * dx + dy * dy;
+  int32_t radiusSquared =
+      static_cast<int32_t>(RoundLayout::GLOBE_RADIUS) *
+      RoundLayout::GLOBE_RADIUS;
+
+  if (distanceSquared <= radiusSquared) {
+    g_globeAnimationRunning = !g_globeAnimationRunning;
+    g_lastGlobeFrameMs = millis();
+    g_redrawRequested = true;
+    Serial.printf("[UI] globe animation -> %s\n",
+                  g_globeAnimationRunning ? "running" : "paused");
+    return;
+  }
+
+  uiCycleBrightness();
+}
+#endif
 
 bool uiDisplayEnabled() {
   return BRIGHTNESS_LEVELS[g_brightnessIdx] > 0;

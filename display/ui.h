@@ -47,6 +47,9 @@ void uiShowReconnectWait(const char *ssid, uint32_t remainSec);
 void uiSetRouterIp(const char *ip);
 void uiObserveTelemetry(const Telemetry &t);
 void uiShowMain(const Telemetry &t);
+#if defined(HW_AMOLED_143)
+void uiHandleTap(int16_t x, int16_t y);
+#endif
 void uiCycleBrightness();
 bool uiDisplayEnabled();
 bool uiConsumeRedrawRequest();

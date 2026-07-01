@@ -72,10 +72,66 @@ bool touchButtonPressed() {
   return false;
 }
 
-#else
+#elif defined(HW_TOUCH_CST9217)
 
-// Заглушка: сенсорный контроллер на этой плате не поддерживается.
-// TODO: реализовать драйвер для FT3168 (T-Display S3 AMOLED 1.43/1.75).
+#include <TouchDrv.hpp>
+
+static constexpr uint32_t TOUCH_DEBOUNCE_MS = 250;
+
+static TouchDrvCST92xx g_cst9217;
+static volatile bool g_irqFlag = false;
+static bool g_touchReady = false;
+static uint32_t g_lastTapMs = 0;
+
+static void IRAM_ATTR onTouchInterrupt() {
+  g_irqFlag = true;
+}
+
+bool touchInit() {
+  g_touchReady = false;
+  g_irqFlag = false;
+
+  Wire.begin(TOUCH_SDA, TOUCH_SCL);
+
+  // У CST9217 на этой плате нет отдельного reset-пина.
+  g_cst9217.setPins(-1, TOUCH_IRQ);
+  if (!g_cst9217.begin(Wire, TOUCH_ADDR, TOUCH_SDA, TOUCH_SCL)) {
+    Serial.printf("[Touch] CST9217 not found at 0x%02X\n", TOUCH_ADDR);
+    return false;
+  }
+
+  pinMode(TOUCH_IRQ, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(TOUCH_IRQ), onTouchInterrupt, FALLING);
+
+  g_touchReady = true;
+  Serial.printf("[Touch] %s initialized at 0x%02X\n",
+                g_cst9217.getModelName(), TOUCH_ADDR);
+  return true;
+}
+
+bool touchReadTap(int16_t &x, int16_t &y) {
+  if (!g_touchReady || !g_irqFlag) return false;
+  g_irqFlag = false;
+
+  const TouchPoints &points = g_cst9217.getTouchPoints();
+  if (!points.hasPoints()) return false;
+  const TouchPoint &point = points.getPoint(0);
+  int16_t rawX = point.x;
+  int16_t rawY = point.y;
+
+  uint32_t now = millis();
+  if (g_lastTapMs != 0 && now - g_lastTapMs < TOUCH_DEBOUNCE_MS) return false;
+  g_lastTapMs = now;
+
+  x = constrain(rawX, static_cast<int16_t>(0),
+                static_cast<int16_t>(SCREEN_W - 1));
+  y = constrain(rawY, static_cast<int16_t>(0),
+                static_cast<int16_t>(SCREEN_H - 1));
+  Serial.printf("[Touch] tap x=%d y=%d\n", x, y);
+  return true;
+}
+
+#else
 
 bool touchInit() {
   Serial.println("[Touch] unsupported on this board");

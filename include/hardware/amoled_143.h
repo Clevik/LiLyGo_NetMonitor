@@ -6,7 +6,7 @@
 //  (CO5300 совместим с ревизиями H0175Y003AM / DO0143FMST10;
 //   для старой ревизии DO0143FAT01 нужен SH8601 — отсутствует
 //   в Arduino_GFX 1.4.9, потребуется обновить библиотеку)
-//  Touch: FT3168 (I2C)
+//  Touch: CST9217 (I2C, ревизия H0175Y003AM 1.75")
 // ============================================================
 
 #define HW_DISP_CO5300
@@ -27,13 +27,9 @@ constexpr uint16_t SCREEN_W = 466;
 constexpr uint16_t SCREEN_H = 466;
 constexpr uint8_t  DISP_ROTATION = 0;
 
-// ---- Touch: FT3168 ----
-// ВНИМАНИЕ: поддержка FT3168 пока не реализована (touch.cpp работает
-// только с CST816T). На этой плате сенсорная кнопка яркости недоступна.
-#define HW_TOUCH_FT3168
+// ---- Touch: CST9217 ----
+#define HW_TOUCH_CST9217
 constexpr int8_t  TOUCH_SDA   = 7;
 constexpr int8_t  TOUCH_SCL   = 6;
 constexpr int8_t  TOUCH_IRQ   = 9;
-constexpr uint8_t TOUCH_ADDR  = 0x38;   // TODO: проверить по даташиту FT3168
-constexpr int16_t TOUCH_BTN_X = -1;
-constexpr int16_t TOUCH_BTN_Y = -1;
+constexpr uint8_t TOUCH_ADDR  = 0x5A;
