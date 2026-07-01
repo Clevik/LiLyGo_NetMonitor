@@ -9,6 +9,8 @@
 #include "config.h"
 #if defined(HW_AMOLED_143)
   #include "globe_frames.h"
+  #include "internet_icon.h"
+  #include "router_icon.h"
 #endif
 #include "ui.h"
 
@@ -887,59 +889,36 @@ static void drawPingHistoryArc(const uint32_t *values,
   }
 }
 
-static void drawEllipse(int16_t cx,
-                        int16_t cy,
-                        int16_t rx,
-                        int16_t ry,
-                        uint16_t color) {
-  int16_t prevX = 0;
-  int16_t prevY = 0;
-  bool havePrev = false;
-  for (int deg = 0; deg <= 360; deg += 8) {
-    float rad = deg * (3.1415926535f / 180.0f);
-    int16_t px = cx + static_cast<int16_t>(cosf(rad) * rx);
-    int16_t py = cy + static_cast<int16_t>(sinf(rad) * ry);
-    if (havePrev) g_canvas->drawLine(prevX, prevY, px, py, color);
-    prevX = px;
-    prevY = py;
-    havePrev = true;
+static void drawRouterIcon(int16_t centerX, int16_t topY, uint16_t color) {
+  int16_t x0 = centerX - ROUTER_ICON_W / 2;
+  for (uint16_t y = 0; y < ROUTER_ICON_H; y++) {
+    for (uint16_t byteX = 0; byteX < ROUTER_ICON_BYTES_PER_ROW; byteX++) {
+      uint16_t offset = y * ROUTER_ICON_BYTES_PER_ROW + byteX;
+      uint8_t mask = pgm_read_byte(&ROUTER_ICON_DATA[offset]);
+      if (!mask) continue;
+      for (uint8_t bit = 0; bit < 8; bit++) {
+        if (mask & (0x80 >> bit)) {
+          g_canvas->drawPixel(x0 + byteX * 8 + bit, topY + y, color);
+        }
+      }
+    }
   }
 }
 
-static void drawRouterIcon(int16_t centerX, int16_t topY, uint16_t color) {
-  constexpr int16_t BODY_TOP_OFFSET = 18;
-  constexpr int16_t BODY_HALF_W = 21;
-  constexpr int16_t BODY_H = 19;
-
-  int16_t bodyTop = topY + BODY_TOP_OFFSET;
-  g_canvas->drawLine(centerX - 15, bodyTop, centerX - 21, topY, color);
-  g_canvas->drawLine(centerX - 14, bodyTop, centerX - 20, topY, color);
-  g_canvas->drawLine(centerX + 15, bodyTop, centerX + 21, topY, color);
-  g_canvas->drawLine(centerX + 14, bodyTop, centerX + 20, topY, color);
-  g_canvas->drawRect(centerX - BODY_HALF_W, bodyTop,
-                     BODY_HALF_W * 2 + 1, BODY_H, color);
-  g_canvas->drawRect(centerX - BODY_HALF_W + 1, bodyTop + 1,
-                     BODY_HALF_W * 2 - 1, BODY_H - 2, color);
-  g_canvas->fillCircle(centerX - 11, bodyTop + 9, 2, color);
-  g_canvas->fillCircle(centerX - 3, bodyTop + 9, 2, color);
-  g_canvas->fillCircle(centerX + 5, bodyTop + 9, 2, color);
-  g_canvas->drawLine(centerX - 15, bodyTop + BODY_H,
-                     centerX - 17, topY + 43, color);
-  g_canvas->drawLine(centerX + 15, bodyTop + BODY_H,
-                     centerX + 17, topY + 43, color);
-}
-
 static void drawGlobeIcon(int16_t centerX, int16_t topY, uint16_t color) {
-  int16_t centerY = topY + RoundLayout::PING_ICON_RADIUS;
-  int16_t radius = RoundLayout::PING_ICON_RADIUS;
-  g_canvas->drawCircle(centerX, centerY, radius, color);
-  g_canvas->drawCircle(centerX, centerY, radius - 1, color);
-  g_canvas->drawLine(centerX - radius + 1, centerY,
-                     centerX + radius - 1, centerY, color);
-  g_canvas->drawLine(centerX, centerY - radius + 1,
-                     centerX, centerY + radius - 1, color);
-  drawEllipse(centerX, centerY, 9, radius - 1, color);
-  drawEllipse(centerX, centerY, 17, radius - 1, color);
+  int16_t x0 = centerX - INTERNET_ICON_W / 2;
+  for (uint16_t y = 0; y < INTERNET_ICON_H; y++) {
+    for (uint16_t byteX = 0; byteX < INTERNET_ICON_BYTES_PER_ROW; byteX++) {
+      uint16_t offset = y * INTERNET_ICON_BYTES_PER_ROW + byteX;
+      uint8_t mask = pgm_read_byte(&INTERNET_ICON_DATA[offset]);
+      if (!mask) continue;
+      for (uint8_t bit = 0; bit < 8; bit++) {
+        if (mask & (0x80 >> bit)) {
+          g_canvas->drawPixel(x0 + byteX * 8 + bit, topY + y, color);
+        }
+      }
+    }
+  }
 }
 
 static void drawDownArrow(int16_t x, int16_t y, uint16_t color) {
