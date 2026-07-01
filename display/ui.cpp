@@ -157,7 +157,7 @@ static void formatSpeedText(double bps,
 
   if (!std::isfinite(bps) || bps <= 0.0) {
     snprintf(val, vLen, (style == SpeedFormatStyle::RoundCompact) ? "-" : "0");
-    *unit = (style == SpeedFormatStyle::RoundCompact) ? "Mbps" :
+    *unit = (style == SpeedFormatStyle::RoundCompact) ? "Mb" :
             (style == SpeedFormatStyle::GraphLabel) ? "bt" : "bit";
     return;
   }
@@ -182,13 +182,13 @@ static void formatSpeedText(double bps,
     case SpeedFormatStyle::RoundCompact:
       if (mbps >= 1.0) {
         snprintf(val, vLen, (mbps < 100.0) ? "%.1f" : "%.0f", mbps);
-        *unit = "Mbps";
+        *unit = "Mb";
       } else if (kbps >= 1.0) {
         snprintf(val, vLen, "%.0f", kbps);
-        *unit = "Kbps";
+        *unit = "Kb";
       } else {
         snprintf(val, vLen, "%.0f", bps);
-        *unit = "bps";
+        *unit = "b";
       }
       break;
 
@@ -361,7 +361,6 @@ constexpr int16_t CENTER_Y = SCREEN_H / 2;
 constexpr int16_t OUTER_RING_RADIUS = 228;
 constexpr int16_t INNER_RING_RADIUS = 223;
 
-constexpr int16_t SPEED_ZONE_Y = 304;
 constexpr int16_t HISTORY_ARC_RADIUS = 205;
 constexpr uint16_t HISTORY_ARC_MAX_SAMPLES = 60;
 constexpr float HISTORY_ARC_SPEED_LIMIT_DEG = 20.0f;
@@ -377,8 +376,6 @@ constexpr int16_t LINE_GRAPH_IN_H = 28;
 constexpr int16_t LINE_GRAPH_OUT_PDF_Y = 35;
 constexpr int16_t LINE_GRAPH_OUT_H = 24;
 
-constexpr int16_t LEFT_METRIC_X = 115;
-
 constexpr int16_t ROUTER_TITLE_Y = 30;
 constexpr uint8_t ROUTER_TITLE_TEXT_SIZE = 2;
 constexpr uint8_t ROUTER_VALUE_TEXT_SIZE = 3;
@@ -386,8 +383,16 @@ constexpr int16_t ROUTER_TITLE_VALUE_GAP = 10;
 constexpr int16_t STATUS_PDF_Y = 360;
 constexpr int16_t STATUS_CENTER_X_OFFSET = 3;
 
-constexpr int16_t GLOBE_PDF_Y = 255;
 constexpr int16_t GLOBE_RADIUS = 80;
+constexpr int16_t GLOBE_CENTER_Y = 211;
+// Низ зоны анимации — y=291; верх зон скорости расположен на 6 px ниже.
+constexpr int16_t SPEED_ZONE_Y = 297;
+// textSize 4 занимает 32 px; ещё по 1 px нужны сверху и снизу для glow.
+constexpr int16_t SPEED_ZONE_H = 34;
+constexpr int16_t SPEED_ZONE_CENTER_Y = 314;
+constexpr int16_t SPEED_ZONE_W = 174;
+constexpr int16_t SPEED_IN_ZONE_X = 54;
+constexpr int16_t SPEED_OUT_ZONE_X = 238;
 constexpr int16_t PING_VALUE_PDF_Y = 210;
 constexpr uint8_t PING_VALUE_TEXT_SIZE = ROUTER_VALUE_TEXT_SIZE;
 constexpr int16_t PING_MAX_VALUE_DIGITS = 5;
@@ -403,20 +408,19 @@ constexpr int16_t PING_ZONE_H = 108;
 constexpr int16_t PING_ICON_TOP_Y = PING_ZONE_Y + 7;
 constexpr int16_t PING_ICON_RADIUS = 22;
 
-constexpr int16_t SPEED_ARROW_PDF_Y = 120;
-constexpr int16_t SPEED_VALUE_PDF_Y = 130;
-constexpr int16_t SPEED_UNIT_PDF_Y = 95;
 constexpr uint8_t SPEED_VALUE_TEXT_SIZE = 4;
-constexpr int16_t SPEED_IN_VALUE_X = 165;
-constexpr int16_t SPEED_OUT_ARROW_X = 290;
-constexpr int16_t SPEED_OUT_VALUE_X = 340;
+constexpr uint8_t SPEED_UNIT_TEXT_SIZE = 3;
 constexpr int16_t SPEED_ARROW_SHAFT_W = 5;
 constexpr int16_t SPEED_ARROW_SHAFT_H = 17;
 constexpr int16_t SPEED_ARROW_HEAD_HALF_W = 11;
-constexpr int16_t SPEED_ARROW_HEAD_BASE_OFFSET = 2;
-constexpr int16_t SPEED_ARROW_HEAD_TIP_OFFSET = 15;
-constexpr int16_t SPEED_ARROW_DOWN_SHAFT_TOP_OFFSET = -13;
-constexpr int16_t SPEED_ARROW_UP_SHAFT_TOP_OFFSET = -4;
+constexpr int16_t SPEED_ARROW_HEAD_BASE_OFFSET = 1;
+constexpr int16_t SPEED_ARROW_HEAD_TIP_OFFSET = 14;
+constexpr int16_t SPEED_ARROW_DOWN_SHAFT_TOP_OFFSET = -14;
+constexpr int16_t SPEED_ARROW_UP_SHAFT_TOP_OFFSET = -2;
+constexpr int16_t SPEED_ARROW_CENTER_X_OFFSET = SPEED_ARROW_HEAD_HALF_W;
+constexpr int16_t SPEED_VALUE_LEFT_X_OFFSET =
+    SPEED_ARROW_HEAD_HALF_W * 2 + 8;
+constexpr int16_t SPEED_VALUE_UNIT_GAP = 6;
 
 constexpr int16_t CENTER_DIVIDER_TOP_PDF_Y = 124;
 constexpr int16_t CENTER_DIVIDER_BOTTOM_PDF_Y = 78;
@@ -501,17 +505,14 @@ static void drawRoundDebugZones() {
   static constexpr uint16_t CLR_DEBUG_TOP = rgb565(0xFF, 0xE0, 0x00);
   static constexpr uint16_t CLR_DEBUG_LEFT = rgb565(0x00, 0xFF, 0x80);
   static constexpr uint16_t CLR_DEBUG_RIGHT = rgb565(0x40, 0xB0, 0xFF);
-  static constexpr uint16_t CLR_DEBUG_CENTER = rgb565(0xFF, 0x40, 0xFF);
   static constexpr uint16_t CLR_DEBUG_BOTTOM = rgb565(0xFF, 0x80, 0x00);
 
   static constexpr RoundDebugZone zones[] = {
       {"SCREEN", 0, 0, SCREEN_W, SCREEN_H, CLR_DIM},
-      {"GLOBE", RoundLayout::CENTER_X - RoundLayout::GLOBE_RADIUS,
-       centerYFromPdf(RoundLayout::GLOBE_PDF_Y) - RoundLayout::GLOBE_RADIUS,
-       RoundLayout::GLOBE_RADIUS * 2, RoundLayout::GLOBE_RADIUS * 2,
-       CLR_DEBUG_CENTER},
-      {"SPEED_L", 54, RoundLayout::SPEED_ZONE_Y, 174, 92, CLR_DEBUG_LEFT},
-      {"SPEED_R", 238, RoundLayout::SPEED_ZONE_Y, 174, 92, CLR_DEBUG_RIGHT},
+      {"SPEED_L", RoundLayout::SPEED_IN_ZONE_X, RoundLayout::SPEED_ZONE_Y,
+       RoundLayout::SPEED_ZONE_W, RoundLayout::SPEED_ZONE_H, CLR_DEBUG_LEFT},
+      {"SPEED_R", RoundLayout::SPEED_OUT_ZONE_X, RoundLayout::SPEED_ZONE_Y,
+       RoundLayout::SPEED_ZONE_W, RoundLayout::SPEED_ZONE_H, CLR_DEBUG_RIGHT},
       {"GRAPH_IN", RoundLayout::LINE_GRAPH_X,
        centerYFromPdf(RoundLayout::LINE_GRAPH_IN_PDF_Y) -
            RoundLayout::LINE_GRAPH_IN_H,
@@ -809,28 +810,34 @@ static void drawPingBlock(int16_t centerX,
                        color, CLR_ROUND_DIM_BLUE);
 }
 
-static void drawSpeedBlock(int16_t arrowX,
-                           int16_t valueX,
+static void drawSpeedBlock(int16_t zoneX,
                            bool upload,
                            double bps) {
   uint16_t color = upload ? CLR_ROUND_UPLOAD : CLR_ROUND_DOWNLOAD;
   char value[16];
-  const char *unit = "Mbps";
+  const char *unit = "Mb";
   formatSpeedText(bps, SpeedFormatStyle::RoundCompact, value, sizeof(value),
                   &unit);
 
-  int16_t valueY = centerYFromPdf(RoundLayout::SPEED_VALUE_PDF_Y);
-  int16_t unitY  = centerYFromPdf(RoundLayout::SPEED_UNIT_PDF_Y);
+  int16_t centerY = RoundLayout::SPEED_ZONE_CENTER_Y;
+  int16_t arrowX = zoneX + RoundLayout::SPEED_ARROW_CENTER_X_OFFSET;
+  int16_t valueLeft = zoneX + RoundLayout::SPEED_VALUE_LEFT_X_OFFSET;
+  int16_t valueW =
+      textPixelWidth(value, RoundLayout::SPEED_VALUE_TEXT_SIZE);
+  int16_t unitLeft =
+      valueLeft + valueW + RoundLayout::SPEED_VALUE_UNIT_GAP;
+  int16_t unitW = textPixelWidth(unit, RoundLayout::SPEED_UNIT_TEXT_SIZE);
+
   if (upload) {
-    drawUpArrow(arrowX, centerYFromPdf(RoundLayout::SPEED_ARROW_PDF_Y), color);
+    drawUpArrow(arrowX, centerY, color);
   } else {
-    drawDownArrow(arrowX, centerYFromPdf(RoundLayout::SPEED_ARROW_PDF_Y),
-                  color);
+    drawDownArrow(arrowX, centerY, color);
   }
-  drawTextCenteredGlow(value, valueX, valueY,
+  drawTextCenteredGlow(value, valueLeft + valueW / 2, centerY,
                        RoundLayout::SPEED_VALUE_TEXT_SIZE, CLR_TEXT,
                        upload ? CLR_ROUND_DIM_BLUE : CLR_ROUND_DIM_GN);
-  drawTextCentered(unit, valueX, unitY, 3, CLR_TEXT);
+  drawTextCentered(unit, unitLeft + unitW / 2, centerY,
+                   RoundLayout::SPEED_UNIT_TEXT_SIZE, CLR_TEXT);
 }
 #endif  // defined(HW_AMOLED_143)
 
@@ -954,8 +961,7 @@ static void uiShowMainRound(const Telemetry &t) {
                 RoundLayout::LINE_GRAPH_W, RoundLayout::LINE_GRAPH_OUT_H,
                 CLR_ROUND_UPLOAD, CLR_ROUND_DIM_BLUE);
 
-  drawGlobeFrame(RoundLayout::CENTER_X,
-                 centerYFromPdf(RoundLayout::GLOBE_PDF_Y));
+  drawGlobeFrame(RoundLayout::CENTER_X, RoundLayout::GLOBE_CENTER_Y);
 
   drawRouterIcon(RoundLayout::PING_LEFT_CENTER_X,
                  RoundLayout::PING_ICON_TOP_Y,
@@ -996,10 +1002,8 @@ static void uiShowMainRound(const Telemetry &t) {
                      RoundLayout::CENTER_X,
                      centerYFromPdf(RoundLayout::CENTER_DIVIDER_BOTTOM_PDF_Y),
                      rgb565(0x80, 0x80, 0x80));
-  drawSpeedBlock(RoundLayout::LEFT_METRIC_X, RoundLayout::SPEED_IN_VALUE_X,
-                 false, t.inBps);
-  drawSpeedBlock(RoundLayout::SPEED_OUT_ARROW_X,
-                 RoundLayout::SPEED_OUT_VALUE_X, true, t.outBps);
+  drawSpeedBlock(RoundLayout::SPEED_IN_ZONE_X, false, t.inBps);
+  drawSpeedBlock(RoundLayout::SPEED_OUT_ZONE_X, true, t.outBps);
 
   String ip = WiFi.localIP().toString();
   drawTextCentered("DEVICE IP", RoundLayout::CENTER_X,
