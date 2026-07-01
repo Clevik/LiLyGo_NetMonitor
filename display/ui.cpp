@@ -425,8 +425,9 @@ constexpr int16_t SPEED_VALUE_UNIT_GAP = 6;
 constexpr int16_t CENTER_DIVIDER_TOP_PDF_Y = 124;
 constexpr int16_t CENTER_DIVIDER_BOTTOM_PDF_Y = 78;
 
-constexpr int16_t DEVICE_TITLE_Y = 426;
-constexpr int16_t DEVICE_IP_Y = 452;
+constexpr int16_t DEVICE_IP_ZONE_Y = 436;
+constexpr int16_t DEVICE_IP_ZONE_H = 16;
+constexpr int16_t DEVICE_IP_CENTER_Y = 444;
 
 constexpr uint16_t GLOBE_FRAME_MS = UI_ROUND_FRAME_MS;
 
@@ -523,7 +524,6 @@ static void drawRoundDebugZones() {
            RoundLayout::LINE_GRAPH_OUT_H,
        RoundLayout::LINE_GRAPH_W, RoundLayout::LINE_GRAPH_OUT_H,
        CLR_DEBUG_BOTTOM},
-      {"DEVICE", 84, 416, 298, 48, CLR_DEBUG_BOTTOM},
   };
 
   for (const RoundDebugZone &zone : zones) {
@@ -1006,10 +1006,9 @@ static void uiShowMainRound(const Telemetry &t) {
   drawSpeedBlock(RoundLayout::SPEED_OUT_ZONE_X, true, t.outBps);
 
   String ip = WiFi.localIP().toString();
-  drawTextCentered("DEVICE IP", RoundLayout::CENTER_X,
-                   RoundLayout::DEVICE_TITLE_Y, 2, CLR_TEXT);
   drawTextCentered(ip.c_str(), RoundLayout::CENTER_X,
-                   RoundLayout::DEVICE_IP_Y, 3, CLR_TEXT);
+                   RoundLayout::DEVICE_IP_CENTER_Y,
+                   RoundLayout::ROUTER_TITLE_TEXT_SIZE, CLR_DIM);
 
   drawRoundDebugZones();
 
