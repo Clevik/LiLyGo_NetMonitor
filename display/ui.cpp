@@ -353,6 +353,8 @@ static constexpr uint16_t CLR_ROUND_WARN     = rgb565(0xFF, 0xB0, 0x00);
 static constexpr uint16_t CLR_ROUND_ALARM    = rgb565(0xFF, 0x30, 0x30);
 static constexpr uint16_t CLR_ROUND_DIM_BLUE = rgb565(0x00, 0x18, 0x30);
 static constexpr uint16_t CLR_ROUND_DIM_GN   = rgb565(0x00, 0x28, 0x10);
+static constexpr uint16_t CLR_GLOBE_LAND     = rgb565(0x3C, 0xB4, 0x64);
+static constexpr uint16_t CLR_GLOBE_OUTLINE  = rgb565(0x5A, 0xC8, 0xFF);
 
 namespace RoundLayout {
 constexpr int16_t CENTER_X = SCREEN_W / 2;
@@ -361,11 +363,13 @@ constexpr int16_t CENTER_Y = SCREEN_H / 2;
 constexpr int16_t OUTER_RING_RADIUS = 228;
 constexpr int16_t INNER_RING_RADIUS = 223;
 
+constexpr int16_t SPEED_ZONE_Y = 304;
 constexpr int16_t HISTORY_ARC_RADIUS = 205;
 constexpr uint16_t HISTORY_ARC_MAX_SAMPLES = 60;
+constexpr float HISTORY_ARC_SPEED_LIMIT_DEG = 20.0f;
 constexpr float HISTORY_IN_START_DEG = 130.0f;
-constexpr float HISTORY_IN_END_DEG = 230.0f;
-constexpr float HISTORY_OUT_START_DEG = -50.0f;
+constexpr float HISTORY_IN_END_DEG = 180.0f + HISTORY_ARC_SPEED_LIMIT_DEG;
+constexpr float HISTORY_OUT_START_DEG = -HISTORY_ARC_SPEED_LIMIT_DEG;
 constexpr float HISTORY_OUT_END_DEG = 50.0f;
 
 constexpr int16_t LINE_GRAPH_X = 60;
@@ -404,9 +408,17 @@ constexpr int16_t PING_ICON_RADIUS = 22;
 constexpr int16_t SPEED_ARROW_PDF_Y = 120;
 constexpr int16_t SPEED_VALUE_PDF_Y = 130;
 constexpr int16_t SPEED_UNIT_PDF_Y = 95;
+constexpr uint8_t SPEED_VALUE_TEXT_SIZE = 4;
 constexpr int16_t SPEED_IN_VALUE_X = 165;
 constexpr int16_t SPEED_OUT_ARROW_X = 290;
 constexpr int16_t SPEED_OUT_VALUE_X = 340;
+constexpr int16_t SPEED_ARROW_SHAFT_W = 5;
+constexpr int16_t SPEED_ARROW_SHAFT_H = 17;
+constexpr int16_t SPEED_ARROW_HEAD_HALF_W = 11;
+constexpr int16_t SPEED_ARROW_HEAD_BASE_OFFSET = 2;
+constexpr int16_t SPEED_ARROW_HEAD_TIP_OFFSET = 15;
+constexpr int16_t SPEED_ARROW_DOWN_SHAFT_TOP_OFFSET = -13;
+constexpr int16_t SPEED_ARROW_UP_SHAFT_TOP_OFFSET = -4;
 
 constexpr int16_t CENTER_DIVIDER_TOP_PDF_Y = 124;
 constexpr int16_t CENTER_DIVIDER_BOTTOM_PDF_Y = 78;
@@ -415,7 +427,6 @@ constexpr int16_t DEVICE_TITLE_Y = 426;
 constexpr int16_t DEVICE_IP_Y = 452;
 
 constexpr uint16_t GLOBE_FRAME_MS = 168;
-constexpr int16_t GLOBE_INNER_RING_RADIUS = 78;
 
 constexpr int16_t PING_VALUE_Y_OFFSET = -22;
 }  // namespace RoundLayout
@@ -501,8 +512,8 @@ static void drawRoundDebugZones() {
        centerYFromPdf(RoundLayout::GLOBE_PDF_Y) - RoundLayout::GLOBE_RADIUS,
        RoundLayout::GLOBE_RADIUS * 2, RoundLayout::GLOBE_RADIUS * 2,
        CLR_DEBUG_CENTER},
-      {"SPEED_L", 54, 304, 174, 92, CLR_DEBUG_LEFT},
-      {"SPEED_R", 238, 304, 174, 92, CLR_DEBUG_RIGHT},
+      {"SPEED_L", 54, RoundLayout::SPEED_ZONE_Y, 174, 92, CLR_DEBUG_LEFT},
+      {"SPEED_R", 238, RoundLayout::SPEED_ZONE_Y, 174, 92, CLR_DEBUG_RIGHT},
       {"GRAPH_IN", RoundLayout::LINE_GRAPH_X,
        centerYFromPdf(RoundLayout::LINE_GRAPH_IN_PDF_Y) -
            RoundLayout::LINE_GRAPH_IN_H,
@@ -728,41 +739,60 @@ static void drawGlobeIcon(int16_t centerX, int16_t topY, uint16_t color) {
 }
 
 static void drawDownArrow(int16_t x, int16_t y, uint16_t color) {
-  g_canvas->fillRect(x - 5, y - 26, 10, 34, color);
-  g_canvas->fillTriangle(x - 22, y + 4, x + 22, y + 4, x, y + 29, color);
+  g_canvas->fillRect(
+      x - RoundLayout::SPEED_ARROW_SHAFT_W / 2,
+      y + RoundLayout::SPEED_ARROW_DOWN_SHAFT_TOP_OFFSET,
+      RoundLayout::SPEED_ARROW_SHAFT_W,
+      RoundLayout::SPEED_ARROW_SHAFT_H, color);
+  g_canvas->fillTriangle(
+      x - RoundLayout::SPEED_ARROW_HEAD_HALF_W,
+      y + RoundLayout::SPEED_ARROW_HEAD_BASE_OFFSET,
+      x + RoundLayout::SPEED_ARROW_HEAD_HALF_W,
+      y + RoundLayout::SPEED_ARROW_HEAD_BASE_OFFSET,
+      x, y + RoundLayout::SPEED_ARROW_HEAD_TIP_OFFSET, color);
 }
 
 static void drawUpArrow(int16_t x, int16_t y, uint16_t color) {
-  g_canvas->fillRect(x - 5, y - 8, 10, 34, color);
-  g_canvas->fillTriangle(x - 22, y - 4, x + 22, y - 4, x, y - 29, color);
+  g_canvas->fillRect(
+      x - RoundLayout::SPEED_ARROW_SHAFT_W / 2,
+      y + RoundLayout::SPEED_ARROW_UP_SHAFT_TOP_OFFSET,
+      RoundLayout::SPEED_ARROW_SHAFT_W,
+      RoundLayout::SPEED_ARROW_SHAFT_H, color);
+  g_canvas->fillTriangle(
+      x - RoundLayout::SPEED_ARROW_HEAD_HALF_W,
+      y - RoundLayout::SPEED_ARROW_HEAD_BASE_OFFSET,
+      x + RoundLayout::SPEED_ARROW_HEAD_HALF_W,
+      y - RoundLayout::SPEED_ARROW_HEAD_BASE_OFFSET,
+      x, y - RoundLayout::SPEED_ARROW_HEAD_TIP_OFFSET, color);
+}
+
+static void drawGlobePlane(int16_t x0,
+                           int16_t y0,
+                           uint8_t frame,
+                           const uint16_t *frameOffsets,
+                           const uint16_t *pixels,
+                           uint16_t color) {
+  uint16_t begin = pgm_read_word(&frameOffsets[frame]);
+  uint16_t end = pgm_read_word(&frameOffsets[frame + 1]);
+  for (uint16_t index = begin; index < end; index++) {
+    uint16_t position = pgm_read_word(&pixels[index]);
+    g_canvas->drawPixel(x0 + position % GLOBE_FRAME_W,
+                        y0 + position / GLOBE_FRAME_W, color);
+  }
 }
 
 static void drawGlobeFrame(int16_t centerX, int16_t centerY) {
   uint8_t frame = (millis() / RoundLayout::GLOBE_FRAME_MS) % GLOBE_FRAME_COUNT;
-  int16_t x0 = centerX - (GLOBE_MASK_W * GLOBE_CELL_PX) / 2;
-  int16_t y0 = centerY - (GLOBE_MASK_H * GLOBE_CELL_PX) / 2;
+  int16_t x0 = centerX - GLOBE_FRAME_W / 2;
+  int16_t y0 = centerY - GLOBE_FRAME_H / 2;
 
   g_canvas->fillCircle(centerX, centerY, RoundLayout::GLOBE_RADIUS,
                        rgb565(0x00, 0x06, 0x10));
-  g_canvas->drawCircle(centerX, centerY, RoundLayout::GLOBE_RADIUS,
-                       CLR_ROUND_UPLOAD);
-  g_canvas->drawCircle(centerX, centerY, RoundLayout::GLOBE_INNER_RING_RADIUS,
-                       CLR_ROUND_DIM_BLUE);
 
-  for (uint8_t y = 0; y < GLOBE_MASK_H; y++) {
-    for (uint8_t byteX = 0; byteX < GLOBE_MASK_W / 8; byteX++) {
-      uint16_t offset = y * (GLOBE_MASK_W / 8) + byteX;
-      uint8_t mask = pgm_read_byte(&GLOBE_FRAME_DATA[frame][offset]);
-      if (!mask) continue;
-      for (uint8_t bit = 0; bit < 8; bit++) {
-        if (mask & (0x80 >> bit)) {
-          int16_t px = x0 + (byteX * 8 + bit) * GLOBE_CELL_PX;
-          int16_t py = y0 + y * GLOBE_CELL_PX;
-          g_canvas->fillRect(px, py, GLOBE_CELL_PX, GLOBE_CELL_PX, CLR_ROUND_UPLOAD);
-        }
-      }
-    }
-  }
+  drawGlobePlane(x0, y0, frame, GLOBE_LAND_FRAME_OFFSETS,
+                 GLOBE_LAND_PIXELS, CLR_GLOBE_LAND);
+  drawGlobePlane(x0, y0, frame, GLOBE_OUTLINE_FRAME_OFFSETS,
+                 GLOBE_OUTLINE_PIXELS, CLR_GLOBE_OUTLINE);
 }
 
 static void drawPingBlock(int16_t centerX,
@@ -805,7 +835,8 @@ static void drawSpeedBlock(int16_t arrowX,
     drawDownArrow(arrowX, centerYFromPdf(RoundLayout::SPEED_ARROW_PDF_Y),
                   color);
   }
-  drawTextCenteredGlow(value, valueX, valueY, 5, CLR_TEXT,
+  drawTextCenteredGlow(value, valueX, valueY,
+                       RoundLayout::SPEED_VALUE_TEXT_SIZE, CLR_TEXT,
                        upload ? CLR_ROUND_DIM_BLUE : CLR_ROUND_DIM_GN);
   drawTextCentered(unit, valueX, unitY, 3, CLR_TEXT);
 }
