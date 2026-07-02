@@ -1361,7 +1361,7 @@ static void uiShowMainRound(const Telemetry &t) {
     formatRouterInfo(t, title, sizeof(title), value, sizeof(value));
     drawTextCentered(title, RoundLayout::CENTER_X,
                      RoundLayout::ROUTER_TITLE_Y,
-                     RoundLayout::ROUTER_TITLE_TEXT_SIZE, CLR_DIM);
+                     RoundLayout::ROUTER_TITLE_TEXT_SIZE, CLR_META);
     drawTextCentered(value, RoundLayout::CENTER_X,
                      routerValueCenterY(),
                      RoundLayout::ROUTER_VALUE_TEXT_SIZE, CLR_TEXT);
@@ -1397,7 +1397,7 @@ static void uiShowMainRound(const Telemetry &t) {
   String ip = WiFi.localIP().toString();
   drawTextCentered(ip.c_str(), RoundLayout::CENTER_X,
                    RoundLayout::DEVICE_IP_CENTER_Y,
-                   RoundLayout::ROUTER_TITLE_TEXT_SIZE, CLR_DIM);
+                   RoundLayout::ROUTER_TITLE_TEXT_SIZE, CLR_META);
 
   drawRoundDebugZones();
 
