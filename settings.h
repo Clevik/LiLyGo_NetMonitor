@@ -7,7 +7,7 @@
 #include <Arduino.h>
 
 // Версия схемы конфигурации (для будущих миграций).
-constexpr uint16_t CONFIG_SCHEMA_VERSION = 4;
+constexpr uint16_t CONFIG_SCHEMA_VERSION = 5;
 constexpr uint32_t SETTINGS_INTERVAL_MIN_SEC = 1;
 constexpr uint32_t SETTINGS_INTERVAL_MAX_SEC = 3600;
 constexpr uint32_t SETTINGS_WIFI_RETRY_MIN_SEC = 1;
@@ -49,6 +49,24 @@ enum class SnmpVersion : uint8_t {
   V2C  = 1,
 };
 
+enum class ColorScheme : uint8_t {
+  Default = 0,
+  Cyber,
+  Ice,
+  Lime,
+  Azure,
+  Mint,
+  Blue,
+  Violet,
+};
+
+constexpr ColorScheme DEFAULT_COLOR_SCHEME = ColorScheme::Default;
+constexpr uint8_t COLOR_SCHEME_COUNT = 8;
+
+inline bool isColorSchemeSupported(ColorScheme scheme) {
+  return static_cast<uint8_t>(scheme) < COLOR_SCHEME_COUNT;
+}
+
 // Структура настроек устройства.
 struct Settings {
   // --- Wi-Fi ---
@@ -76,6 +94,7 @@ struct Settings {
 
   // --- Дисплей ---
   uint16_t    displayRotation = DEFAULT_DISPLAY_ROTATION;  // градусы
+  ColorScheme colorScheme = DEFAULT_COLOR_SCHEME;
 
   // Признак валидной сохранённой конфигурации.
   bool        configured     = false;

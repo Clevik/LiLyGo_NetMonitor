@@ -7,6 +7,7 @@
 #include <LittleFS.h>
 
 #include "portal.h"
+#include "display/color_schemes.h"
 
 static const char *AP_PASSWORD = "12345678";
 
@@ -28,6 +29,25 @@ static void addDisplaySettings(JsonDocument &doc) {
   JsonArray rotations = doc["supportedRotations"].to<JsonArray>();
   for (size_t i = 0; i < SUPPORTED_DISPLAY_ROTATION_COUNT; ++i) {
     rotations.add(SUPPORTED_DISPLAY_ROTATIONS[i]);
+  }
+
+  doc["colorScheme"] = static_cast<uint8_t>(
+      g_cfg ? g_cfg->colorScheme : DEFAULT_COLOR_SCHEME);
+  JsonArray schemes = doc["colorSchemes"].to<JsonArray>();
+  for (size_t i = 0; i < COLOR_SCHEME_DEFINITION_COUNT; ++i) {
+    const ColorSchemeDefinition &definition =
+        COLOR_SCHEME_DEFINITIONS[i];
+    JsonObject scheme = schemes.add<JsonObject>();
+    scheme["id"] = static_cast<uint8_t>(definition.id);
+    scheme["name"] = definition.name;
+    char incoming[8];
+    char outgoing[8];
+    snprintf(incoming, sizeof(incoming), "#%06lX",
+             static_cast<unsigned long>(definition.incomingRgb));
+    snprintf(outgoing, sizeof(outgoing), "#%06lX",
+             static_cast<unsigned long>(definition.outgoingRgb));
+    scheme["incoming"] = incoming;
+    scheme["outgoing"] = outgoing;
   }
 }
 
@@ -86,6 +106,10 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   long wifiRetryDelaySec = doc["wretry"] | 20L;
   long displayRotation   = doc["rotation"] |
                            static_cast<long>(DEFAULT_DISPLAY_ROTATION);
+  long colorScheme       = doc["colorScheme"] |
+                           static_cast<long>(
+                               static_cast<uint8_t>(
+                                   DEFAULT_COLOR_SCHEME));
   next.snmpPort          = (snmpPort >= 1 && snmpPort <= 65535)
                              ? static_cast<uint16_t>(snmpPort) : 0;
   next.ifIndex           = ifIndex > 0 ? static_cast<uint32_t>(ifIndex) : 0;
@@ -97,6 +121,11 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
       (displayRotation >= 0 && displayRotation <= UINT16_MAX)
           ? static_cast<uint16_t>(displayRotation)
           : UINT16_MAX;
+  next.colorScheme       =
+      (colorScheme >= 0 && colorScheme <= UINT8_MAX)
+          ? static_cast<ColorScheme>(
+                static_cast<uint8_t>(colorScheme))
+          : static_cast<ColorScheme>(UINT8_MAX);
   next.configured        = true;
 
   normalizeSettings(next);

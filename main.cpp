@@ -117,7 +117,7 @@ void setup() {
   touchInit(g_settings.displayRotation);
 #endif
 
-  if (!uiInit(g_settings.displayRotation)) {
+  if (!uiInit(g_settings.displayRotation, g_settings.colorScheme)) {
     Serial.println("[UI] display init failed, halting");
     while (true) delay(1000);
   }
@@ -143,7 +143,8 @@ void loop() {
       Serial.println("[FSM] KEY long press -> reset config");
       SettingsStore::clear();
       g_settings = Settings{};
-      uiSetRotation(g_settings.displayRotation);
+      uiApplyDisplaySettings(g_settings.displayRotation,
+                             g_settings.colorScheme);
       touchSetRotation(g_settings.displayRotation);
       WiFi.disconnect(true, true);
       enterState(AppState::ApConfig);
@@ -157,7 +158,8 @@ void loop() {
       if (portalConfigSaved()) {
         Serial.println("[Portal] config saved, connecting...");
         SettingsStore::save(g_settings);
-        uiSetRotation(g_settings.displayRotation);
+        uiApplyDisplaySettings(g_settings.displayRotation,
+                               g_settings.colorScheme);
         touchSetRotation(g_settings.displayRotation);
         enterState(AppState::WifiConnect);
       }
@@ -214,7 +216,8 @@ void loop() {
       if (otaSettingsSaved()) {
         Serial.println("[OTA] settings saved");
         SettingsStore::save(g_settings);
-        uiSetRotation(g_settings.displayRotation);
+        uiApplyDisplaySettings(g_settings.displayRotation,
+                               g_settings.colorScheme);
         touchSetRotation(g_settings.displayRotation);
         if (otaTelemetrySettingsChanged()) {
           Serial.println("[OTA] telemetry settings changed, restarting telemetry...");

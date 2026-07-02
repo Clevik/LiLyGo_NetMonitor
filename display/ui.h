@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "settings.h"
 
 constexpr uint32_t UI_ROUND_FRAME_MS = 112;
 
@@ -38,8 +39,9 @@ struct Telemetry {
   bool     dataValid      = false;
 };
 
-bool uiInit(uint16_t displayRotation);
-bool uiSetRotation(uint16_t displayRotation);
+bool uiInit(uint16_t displayRotation, ColorScheme colorScheme);
+bool uiApplyDisplaySettings(uint16_t displayRotation,
+                            ColorScheme colorScheme);
 void uiShowSplash();
 void uiShowApConfig(const char *apName, const char *apIp);
 void uiShowConnecting(const char *ssid);

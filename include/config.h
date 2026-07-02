@@ -40,6 +40,4 @@ constexpr uint16_t CLR_STATUS_DN  = 0xF800;
 constexpr uint16_t CLR_STATUS_UNC = 0xFFE0;
 constexpr uint16_t CLR_STATUS_CONN = 0xAFE5;
 constexpr uint16_t CLR_PING      = 0x07FF;
-constexpr uint16_t CLR_TRAFF_IN  = 0xAFE5;
-constexpr uint16_t CLR_TRAFF_OUT = 0xFD20;
 constexpr uint16_t CLR_DIM       = 0x39E7;

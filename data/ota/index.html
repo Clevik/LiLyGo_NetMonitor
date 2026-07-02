@@ -20,6 +20,9 @@ input:focus{border-color:#07ff}
 .btn2:hover{background:#777}
 small{color:#666;font-size:12px}
 #status{text-align:center;padding:8px;color:#07ff;display:none}
+.scheme-preview{display:flex;gap:12px;margin-top:10px}
+.scheme-preview-item{flex:1;text-align:center}
+.scheme-swatch{height:34px;border:1px solid #666;border-radius:6px;margin-bottom:4px}
 </style></head><body>
 <h1>NETMONITOR</h1>
 <div class='card'>
@@ -60,6 +63,19 @@ small{color:#666;font-size:12px}
 <label>Display Rotation</label>
 <select id='rotation'><option value='0'>0°</option></select>
 <small>The new rotation is applied immediately without restarting the device.</small>
+<label>Color Scheme</label>
+<select id='colorScheme' onchange='updateColorSchemePreview()'>
+<option value='0'>Default</option>
+</select>
+<div class='scheme-preview'>
+<div class='scheme-preview-item'>
+<div id='incomingSwatch' class='scheme-swatch'></div><small>Incoming</small>
+</div>
+<div class='scheme-preview-item'>
+<div id='outgoingSwatch' class='scheme-swatch'></div><small>Outgoing</small>
+</div>
+</div>
+<small>The new color scheme is applied immediately without restarting the device.</small>
 </div>
 <div id='status'></div>
 <button class='btn' onclick='doSave()'>Save</button>
@@ -70,6 +86,23 @@ function setRotationOptions(d){
   var select=document.getElementById('rotation');
   select.innerHTML=values.map(v=>'<option value="'+v+'">'+v+'°</option>').join('');
   select.value=String(d.rotation||0);
+}
+var availableColorSchemes=[];
+function setColorSchemeOptions(d){
+  availableColorSchemes=Array.isArray(d.colorSchemes)?d.colorSchemes:[];
+  var select=document.getElementById('colorScheme');
+  select.innerHTML=availableColorSchemes
+    .map(s=>'<option value="'+s.id+'">'+s.name+'</option>').join('');
+  select.value=String(Number.isInteger(d.colorScheme)?d.colorScheme:0);
+  updateColorSchemePreview();
+}
+function updateColorSchemePreview(){
+  var id=+document.getElementById('colorScheme').value;
+  var scheme=availableColorSchemes.find(s=>s.id===id);
+  document.getElementById('incomingSwatch').style.background=
+    scheme?scheme.incoming:'#000';
+  document.getElementById('outgoingSwatch').style.background=
+    scheme?scheme.outgoing:'#000';
 }
 fetch('/api/settings').then(r=>r.json()).then(d=>{
   document.getElementById('router').value=d.router||'';
@@ -85,6 +118,7 @@ fetch('/api/settings').then(r=>r.json()).then(d=>{
   document.getElementById('intv').value=d.intv||5;
   document.getElementById('wretry').value=d.wretry||20;
   setRotationOptions(d);
+  setColorSchemeOptions(d);
 }).catch(()=>{});
 function validInterval(v){return v>=1&&v<=3600&&Math.floor(v)===v;}
 function validPort(v){return v>=1&&v<=65535&&Math.floor(v)===v;}
@@ -96,6 +130,7 @@ function doSave(){
   var rciintv=+document.getElementById('rciintv').value;
   var wretry=+document.getElementById('wretry').value;
   var rotation=+document.getElementById('rotation').value;
+  var colorScheme=+document.getElementById('colorScheme').value;
   if(!ifidx||ifidx<1||Math.floor(ifidx)!==ifidx){alert('Enter Interface Index greater than 0');return;}
   if(!validPort(sport)){alert('SNMP Port must be 1..65535');return;}
   if(!validInterval(pintv)||!validInterval(intv)){alert('Ping and SNMP intervals must be 1..3600 sec');return;}
@@ -114,7 +149,8 @@ function doSave(){
     pintv:pintv,
     intv:intv,
     wretry:wretry,
-    rotation:rotation
+    rotation:rotation,
+    colorScheme:colorScheme
   };
   if(!d.router.trim()){alert('Enter Router IP');return;}
   if(!d.scom.trim()){alert('Enter SNMP Community');return;}

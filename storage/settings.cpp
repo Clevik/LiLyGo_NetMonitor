@@ -139,6 +139,9 @@ bool validateSettings(const Settings &settings, String *error) {
   if (!isDisplayRotationSupported(settings.displayRotation)) {
     return reject(error, "Display Rotation is not supported");
   }
+  if (!isColorSchemeSupported(settings.colorScheme)) {
+    return reject(error, "Color Scheme is not supported");
+  }
   if (!hasText(settings.wifiSsid)) {
     return reject(error, "SSID is empty");
   }
@@ -227,6 +230,8 @@ bool load(Settings &out) {
   out.updateIntervalSec = prefs.getULong("intv", 5);
   out.displayRotation = prefs.getUShort(
       "drot", DEFAULT_DISPLAY_ROTATION);
+  out.colorScheme = static_cast<ColorScheme>(prefs.getUChar(
+      "theme", static_cast<uint8_t>(DEFAULT_COLOR_SCHEME)));
 
   prefs.end();
 
@@ -236,6 +241,12 @@ bool load(Settings &out) {
                   static_cast<unsigned>(out.displayRotation),
                   static_cast<unsigned>(DEFAULT_DISPLAY_ROTATION));
     out.displayRotation = DEFAULT_DISPLAY_ROTATION;
+  }
+  if (!isColorSchemeSupported(out.colorScheme)) {
+    Serial.printf("[Settings] unsupported color scheme %u, using Default\n",
+                  static_cast<unsigned>(
+                      static_cast<uint8_t>(out.colorScheme)));
+    out.colorScheme = DEFAULT_COLOR_SCHEME;
   }
   normalizeSettings(out);
 
@@ -282,6 +293,7 @@ bool save(const Settings &in) {
   prefs.putULong("pintv",  stored.pingIntervalSec);
   prefs.putULong("intv",   stored.updateIntervalSec);
   prefs.putUShort("drot",  stored.displayRotation);
+  prefs.putUChar("theme",  static_cast<uint8_t>(stored.colorScheme));
 
   prefs.end();
   return true;

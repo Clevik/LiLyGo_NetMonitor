@@ -8,6 +8,7 @@
 
 #include "config.h"
 #include "settings.h"
+#include "color_schemes.h"
 #if defined(HW_AMOLED_143)
   #include "globe_frames.h"
   #include "internet_icon.h"
@@ -27,6 +28,57 @@ static constexpr uint8_t BRIGHTNESS_LEVELS[] = {0xFF, 0xBF, 0x80, 0x4D, 0x00};
 static constexpr uint8_t BRIGHTNESS_COUNT = 5;
 static uint8_t g_brightnessIdx = 0;
 static bool g_redrawRequested = false;
+
+constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
+  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+}
+
+constexpr uint16_t rgb565(uint32_t rgb) {
+  return rgb565(static_cast<uint8_t>((rgb >> 16) & 0xFF),
+                static_cast<uint8_t>((rgb >> 8) & 0xFF),
+                static_cast<uint8_t>(rgb & 0xFF));
+}
+
+struct UiColorPalette {
+  uint16_t incoming;
+  uint16_t outgoing;
+  uint16_t incomingDim;
+  uint16_t outgoingDim;
+};
+
+static UiColorPalette g_colorPalette = {};
+
+static uint32_t dimRgb(uint32_t rgb) {
+  constexpr uint32_t DIM_PERCENT = 16;
+  uint32_t r = ((rgb >> 16) & 0xFF) * DIM_PERCENT / 100;
+  uint32_t g = ((rgb >> 8) & 0xFF) * DIM_PERCENT / 100;
+  uint32_t b = (rgb & 0xFF) * DIM_PERCENT / 100;
+  return (r << 16) | (g << 8) | b;
+}
+
+static bool setActiveColorScheme(ColorScheme colorScheme) {
+  const ColorSchemeDefinition *definition =
+      findColorSchemeDefinition(colorScheme);
+  if (!definition) {
+    return false;
+  }
+
+  g_colorPalette.incoming = rgb565(definition->incomingRgb);
+  g_colorPalette.outgoing = rgb565(definition->outgoingRgb);
+#if defined(HW_AMOLED_143)
+  if (colorScheme == ColorScheme::Default) {
+    g_colorPalette.incomingDim = rgb565(0x00, 0x28, 0x10);
+    g_colorPalette.outgoingDim = rgb565(0x00, 0x18, 0x30);
+  } else
+#endif
+  {
+    g_colorPalette.incomingDim =
+        rgb565(dimRgb(definition->incomingRgb));
+    g_colorPalette.outgoingDim =
+        rgb565(dimRgb(definition->outgoingRgb));
+  }
+  return true;
+}
 
 #if defined(HW_AMOLED_143)
 static constexpr uint8_t GLOBE_REST_FRAME_INDEX = 4;
@@ -140,7 +192,12 @@ static void pushPingHistory(const Telemetry &t) {
 }
 #endif
 
-bool uiInit(uint16_t displayRotation) {
+bool uiInit(uint16_t displayRotation, ColorScheme colorScheme) {
+  if (!isDisplayRotationSupported(displayRotation) ||
+      !setActiveColorScheme(colorScheme)) {
+    return false;
+  }
+
   Serial.printf("[UI] canvas need: %ux%u RGB565 = %u bytes\n",
         static_cast<unsigned>(SCREEN_W),
         static_cast<unsigned>(SCREEN_H),
@@ -182,8 +239,10 @@ bool uiInit(uint16_t displayRotation) {
   return true;
 }
 
-bool uiSetRotation(uint16_t displayRotation) {
-  if (!g_canvas || !isDisplayRotationSupported(displayRotation)) {
+bool uiApplyDisplaySettings(uint16_t displayRotation,
+                            ColorScheme colorScheme) {
+  if (!g_canvas || !isDisplayRotationSupported(displayRotation) ||
+      !setActiveColorScheme(colorScheme)) {
     return false;
   }
 
@@ -191,8 +250,11 @@ bool uiSetRotation(uint16_t displayRotation) {
   g_canvas->fillScreen(CLR_BG);
   g_canvas->flush();
   g_redrawRequested = true;
-  Serial.printf("[UI] display rotation -> %u degrees\n",
-                static_cast<unsigned>(displayRotation));
+  const ColorSchemeDefinition *definition =
+      findColorSchemeDefinition(colorScheme);
+  Serial.printf("[UI] display rotation=%u degrees, color scheme=%s\n",
+                static_cast<unsigned>(displayRotation),
+                definition ? definition->name : "unknown");
   return true;
 }
 
@@ -473,16 +535,9 @@ static uint16_t statusColorRect(const Telemetry &t) {
 }
 
 #if defined(HW_AMOLED_143)
-constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
-  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-}
-
-static constexpr uint16_t CLR_ROUND_DOWNLOAD = rgb565(0x00, 0xFF, 0x40);
-static constexpr uint16_t CLR_ROUND_UPLOAD   = rgb565(0x00, 0x80, 0xFF);
+static constexpr uint16_t CLR_ROUND_STATUS_UP = rgb565(0x00, 0xFF, 0x40);
 static constexpr uint16_t CLR_ROUND_WARN     = rgb565(0xFF, 0xB0, 0x00);
 static constexpr uint16_t CLR_ROUND_ALARM    = rgb565(0xFF, 0x30, 0x30);
-static constexpr uint16_t CLR_ROUND_DIM_BLUE = rgb565(0x00, 0x18, 0x30);
-static constexpr uint16_t CLR_ROUND_DIM_GN   = rgb565(0x00, 0x28, 0x10);
 
 namespace RoundLayout {
 constexpr int16_t CENTER_X = SCREEN_W / 2;
@@ -657,7 +712,7 @@ static uint16_t wanConnectionStateRoundColor(WanConnectionState state) {
     case WanConnectionState::Other:
       return CLR_STATUS_CONN;
     case WanConnectionState::Connected:
-      return CLR_ROUND_DOWNLOAD;
+      return CLR_ROUND_STATUS_UP;
     case WanConnectionState::Unknown:
     default:
       return CLR_DIM;
@@ -672,7 +727,7 @@ static uint16_t statusColor(const Telemetry &t) {
   if (t.linkUp) {
     if (t.pingLoss && !t.linkUncertain) return CLR_ROUND_ALARM;
     if (t.linkUncertain) return CLR_ROUND_WARN;
-    return CLR_ROUND_DOWNLOAD;
+    return CLR_ROUND_STATUS_UP;
   }
   if (t.pingValid && !t.pingLoss) return CLR_ROUND_WARN;
   return CLR_ROUND_ALARM;
@@ -1009,7 +1064,7 @@ static void drawGlobeFrame(int16_t centerX, int16_t centerY) {
       for (uint8_t bit = 0; bit < 8; bit++) {
         if (mask & (0x80 >> bit)) {
           g_canvas->drawPixel(x0 + byteX * 8 + bit, y0 + y,
-                              CLR_ROUND_UPLOAD);
+                              g_colorPalette.outgoing);
         }
       }
     }
@@ -1022,6 +1077,7 @@ static void drawPingBlock(int16_t centerX,
                           bool loss,
                           uint32_t ms,
                           uint16_t color,
+                          uint16_t dimColor,
                           const uint32_t *history,
                           const PingArcSampleState *historyStates) {
   if (loss || !valid) {
@@ -1035,7 +1091,7 @@ static void drawPingBlock(int16_t centerX,
     drawTextCenteredGlow(buf, centerX,
                          valueY + RoundLayout::PING_VALUE_Y_OFFSET,
                          RoundLayout::PING_VALUE_TEXT_SIZE,
-                         color, CLR_ROUND_DIM_BLUE);
+                         color, dimColor);
   }
 
   PingHistoryRange range = pingHistoryRange(history, historyStates);
@@ -1054,7 +1110,8 @@ static void drawPingBlock(int16_t centerX,
 static void drawSpeedBlock(int16_t zoneX,
                            bool upload,
                            double bps) {
-  uint16_t color = upload ? CLR_ROUND_UPLOAD : CLR_ROUND_DOWNLOAD;
+  uint16_t color =
+      upload ? g_colorPalette.outgoing : g_colorPalette.incoming;
   char value[16];
   const char *unit = "Mbps";
   formatSpeedText(bps, SpeedFormatStyle::RoundCompact, value, sizeof(value),
@@ -1076,7 +1133,8 @@ static void drawSpeedBlock(int16_t zoneX,
   }
   drawTextCenteredGlow(value, valueLeft + valueW / 2, centerY,
                        RoundLayout::SPEED_VALUE_TEXT_SIZE, CLR_TEXT,
-                       upload ? CLR_ROUND_DIM_BLUE : CLR_ROUND_DIM_GN);
+                       upload ? g_colorPalette.outgoingDim
+                              : g_colorPalette.incomingDim);
   drawTextCentered(unit, unitLeft + unitW / 2,
                    RoundLayout::SPEED_UNIT_CENTER_Y,
                    RoundLayout::SPEED_UNIT_TEXT_SIZE, CLR_TEXT);
@@ -1261,20 +1319,22 @@ static void uiShowMainRound(const Telemetry &t) {
   drawPingHistoryArc(g_routerPingHistory, g_routerPingState,
                      RoundLayout::HISTORY_IN_START_DEG,
                      RoundLayout::HISTORY_IN_END_DEG,
-                     CLR_ROUND_DOWNLOAD, CLR_ROUND_DIM_GN);
+                     g_colorPalette.incoming,
+                     g_colorPalette.incomingDim);
   drawPingHistoryArc(g_externalPingHistory, g_externalPingState,
                      RoundLayout::HISTORY_OUT_START_DEG,
                      RoundLayout::HISTORY_OUT_END_DEG,
-                     CLR_ROUND_UPLOAD, CLR_ROUND_DIM_BLUE);
+                     g_colorPalette.outgoing,
+                     g_colorPalette.outgoingDim);
 
   drawLineGraph(g_histIn, RoundLayout::LINE_GRAPH_IN_X,
                 RoundLayout::LINE_GRAPH_Y,
                 RoundLayout::LINE_GRAPH_IN_W, RoundLayout::LINE_GRAPH_H,
-                CLR_ROUND_DOWNLOAD, CLR_ROUND_DIM_GN);
+                g_colorPalette.incoming, g_colorPalette.incomingDim);
   drawLineGraph(g_histOut, RoundLayout::LINE_GRAPH_OUT_X,
                 RoundLayout::LINE_GRAPH_Y,
                 RoundLayout::LINE_GRAPH_OUT_W, RoundLayout::LINE_GRAPH_H,
-                CLR_ROUND_UPLOAD, CLR_ROUND_DIM_BLUE);
+                g_colorPalette.outgoing, g_colorPalette.outgoingDim);
   if (g_histCount >= 2) {
     drawGraphMaxPill(
         lineGraphWindowMax(g_histIn, RoundLayout::LINE_GRAPH_IN_W),
@@ -1288,10 +1348,10 @@ static void uiShowMainRound(const Telemetry &t) {
 
   drawRouterIcon(RoundLayout::PING_LEFT_CENTER_X,
                  RoundLayout::PING_ICON_TOP_Y,
-                 CLR_ROUND_DOWNLOAD);
+                 g_colorPalette.incoming);
   drawGlobeIcon(RoundLayout::PING_RIGHT_CENTER_X,
                 RoundLayout::PING_ICON_TOP_Y,
-                CLR_ROUND_UPLOAD);
+                g_colorPalette.outgoing);
 
   {
     char title[48];
@@ -1314,12 +1374,14 @@ static void uiShowMainRound(const Telemetry &t) {
   drawPingBlock(RoundLayout::PING_LEFT_CENTER_X,
                 centerYFromPdf(RoundLayout::PING_VALUE_PDF_Y),
                 routerValid, t.dataValid && !t.routerPingValid,
-                t.routerPingMs, CLR_ROUND_DOWNLOAD,
+                t.routerPingMs, g_colorPalette.incoming,
+                g_colorPalette.incomingDim,
                 g_routerPingHistory, g_routerPingState);
   drawPingBlock(RoundLayout::PING_RIGHT_CENTER_X,
                 centerYFromPdf(RoundLayout::PING_VALUE_PDF_Y),
                 t.dataValid && t.pingValid, t.dataValid && t.pingLoss,
-                t.pingMs, CLR_ROUND_UPLOAD,
+                t.pingMs, g_colorPalette.outgoing,
+                g_colorPalette.outgoingDim,
                 g_externalPingHistory, g_externalPingState);
 
   g_canvas->drawLine(RoundLayout::CENTER_X,
@@ -1494,7 +1556,7 @@ static void uiShowMainRect(const Telemetry &t) {
 
     // Входящий (слева)
     g_canvas->setTextSize(4);
-    g_canvas->setTextColor(CLR_TRAFF_IN);
+    g_canvas->setTextColor(g_colorPalette.incoming);
     g_canvas->setCursor(12, rowY);
     g_canvas->print("\x19 ");
     {
@@ -1517,7 +1579,7 @@ static void uiShowMainRect(const Telemetry &t) {
     // Исходящий (левый край = центр экрана)
     constexpr int16_t OUT_X = SCREEN_W / 2;
     g_canvas->setTextSize(4);
-    g_canvas->setTextColor(CLR_TRAFF_OUT);
+    g_canvas->setTextColor(g_colorPalette.outgoing);
     g_canvas->setCursor(OUT_X, rowY);
     g_canvas->print("\x18 ");
     {
@@ -1576,8 +1638,9 @@ static void uiShowMainRect(const Telemetry &t) {
         }
       };
 
-      drawHalf(g_histIn,  maxIn,  GX,         CLR_TRAFF_IN);
-      drawHalf(g_histOut, maxOut, GX + HALF_W, CLR_TRAFF_OUT);
+      drawHalf(g_histIn, maxIn, GX, g_colorPalette.incoming);
+      drawHalf(g_histOut, maxOut, GX + HALF_W,
+               g_colorPalette.outgoing);
 
       constexpr uint16_t CLR_LABEL_BG = 0x39E7;
       constexpr int16_t PAD   = 4;

@@ -6,6 +6,7 @@
 #include <LittleFS.h>
 
 #include "ota.h"
+#include "display/color_schemes.h"
 
 static constexpr size_t MAX_SETTINGS_BODY = 2048;
 
@@ -37,6 +38,25 @@ static void addSupportedDisplayRotations(JsonDocument &doc) {
   }
 }
 
+static void addColorSchemes(JsonDocument &doc) {
+  JsonArray schemes = doc["colorSchemes"].to<JsonArray>();
+  for (size_t i = 0; i < COLOR_SCHEME_DEFINITION_COUNT; ++i) {
+    const ColorSchemeDefinition &definition =
+        COLOR_SCHEME_DEFINITIONS[i];
+    JsonObject scheme = schemes.add<JsonObject>();
+    scheme["id"] = static_cast<uint8_t>(definition.id);
+    scheme["name"] = definition.name;
+    char incoming[8];
+    char outgoing[8];
+    snprintf(incoming, sizeof(incoming), "#%06lX",
+             static_cast<unsigned long>(definition.incomingRgb));
+    snprintf(outgoing, sizeof(outgoing), "#%06lX",
+             static_cast<unsigned long>(definition.outgoingRgb));
+    scheme["incoming"] = incoming;
+    scheme["outgoing"] = outgoing;
+  }
+}
+
 static void handleApiSettings(AsyncWebServerRequest *req) {
   if (!g_cfg) {
     req->send(500, "application/json", "{}");
@@ -57,6 +77,8 @@ static void handleApiSettings(AsyncWebServerRequest *req) {
   doc["wretry"] = g_cfg->wifiRetryDelaySec;
   doc["rotation"] = g_cfg->displayRotation;
   addSupportedDisplayRotations(doc);
+  doc["colorScheme"] = static_cast<uint8_t>(g_cfg->colorScheme);
+  addColorSchemes(doc);
   String json;
   serializeJson(doc, json);
   req->send(200, "application/json", json);
@@ -95,6 +117,9 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   long wifiRetryDelaySec = doc["wretry"] | static_cast<long>(next.wifiRetryDelaySec);
   long displayRotation = doc["rotation"] |
                          static_cast<long>(next.displayRotation);
+  long colorScheme = doc["colorScheme"] |
+                     static_cast<long>(
+                         static_cast<uint8_t>(next.colorScheme));
   next.snmpPort        = (snmpPort >= 1 && snmpPort <= 65535)
                            ? static_cast<uint16_t>(snmpPort) : 0;
   next.ifIndex         = ifIndex > 0 ? static_cast<uint32_t>(ifIndex) : 0;
@@ -106,6 +131,11 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
       (displayRotation >= 0 && displayRotation <= UINT16_MAX)
           ? static_cast<uint16_t>(displayRotation)
           : UINT16_MAX;
+  next.colorScheme =
+      (colorScheme >= 0 && colorScheme <= UINT8_MAX)
+          ? static_cast<ColorScheme>(
+                static_cast<uint8_t>(colorScheme))
+          : static_cast<ColorScheme>(UINT8_MAX);
 
   normalizeSettings(next);
 
