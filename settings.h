@@ -5,9 +5,11 @@
 #pragma once
 
 #include <Arduino.h>
+#include "display/power_policy.h"
 
 // Версия схемы конфигурации (для будущих миграций).
 constexpr uint16_t CONFIG_SCHEMA_VERSION = 5;
+constexpr uint8_t POWER_SETTINGS_SCHEMA_VERSION = 1;
 constexpr uint32_t SETTINGS_INTERVAL_MIN_SEC = 1;
 constexpr uint32_t SETTINGS_INTERVAL_MAX_SEC = 3600;
 constexpr uint32_t SETTINGS_WIFI_RETRY_MIN_SEC = 1;
@@ -67,6 +69,17 @@ inline bool isColorSchemeSupported(ColorScheme scheme) {
   return static_cast<uint8_t>(scheme) < COLOR_SCHEME_COUNT;
 }
 
+struct PowerSaveSettings {
+  BrightnessLevel startupBrightness = BrightnessLevel::Full;
+  bool            autoOffEnabled = false;
+  uint16_t        autoOffMinutes = 5;
+  bool            scheduleEnabled = false;
+  uint16_t        nightStartMinute = 23 * 60;
+  uint16_t        nightEndMinute = 7 * 60;
+  BrightnessLevel nightBrightness = BrightnessLevel::Quarter;
+  String          timeZone = "Europe/Moscow";
+};
+
 // Структура настроек устройства.
 struct Settings {
   // --- Wi-Fi ---
@@ -95,6 +108,7 @@ struct Settings {
   // --- Дисплей ---
   uint16_t    displayRotation = DEFAULT_DISPLAY_ROTATION;  // градусы
   ColorScheme colorScheme = DEFAULT_COLOR_SCHEME;
+  PowerSaveSettings powerSave;
 
   // Признак валидной сохранённой конфигурации.
   bool        configured     = false;

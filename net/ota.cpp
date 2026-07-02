@@ -1,14 +1,16 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <Update.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 
 #include "ota.h"
+#include "ota_update.h"
+#include "telemetry.h"
+#include "time_service.h"
 #include "display/color_schemes.h"
 
-static constexpr size_t MAX_SETTINGS_BODY = 2048;
+static constexpr size_t MAX_SETTINGS_BODY = 4096;
 
 static AsyncWebServer *g_srv   = nullptr;
 static Settings       *g_cfg   = nullptr;
@@ -57,6 +59,101 @@ static void addColorSchemes(JsonDocument &doc) {
   }
 }
 
+static void addPowerSettings(JsonDocument &doc) {
+  JsonObject object = doc["powerSafe"].to<JsonObject>();
+  object["startupBrightness"] =
+      static_cast<uint8_t>(g_cfg->powerSave.startupBrightness);
+  object["autoOffEnabled"] = g_cfg->powerSave.autoOffEnabled;
+  object["autoOffMinutes"] = g_cfg->powerSave.autoOffMinutes;
+  object["scheduleEnabled"] = g_cfg->powerSave.scheduleEnabled;
+  object["nightStartMinute"] = g_cfg->powerSave.nightStartMinute;
+  object["nightEndMinute"] = g_cfg->powerSave.nightEndMinute;
+  object["nightBrightness"] =
+      static_cast<uint8_t>(g_cfg->powerSave.nightBrightness);
+  object["timeZone"] = g_cfg->powerSave.timeZone;
+}
+
+static bool readPowerSettings(const JsonDocument &doc,
+                              Settings &settings,
+                              String &error) {
+  JsonVariantConst value = doc["powerSafe"];
+  if (value.isNull()) return true;
+  if (!value.is<JsonObjectConst>()) {
+    error = "Power Safe must be an object";
+    return false;
+  }
+  JsonObjectConst power = value.as<JsonObjectConst>();
+  const char *numericFields[] = {
+      "startupBrightness", "autoOffMinutes", "nightStartMinute",
+      "nightEndMinute", "nightBrightness"};
+  for (const char *field : numericFields) {
+    if (!power[field].isNull() && !power[field].is<long>()) {
+      error = String("Power Safe field must be an integer: ") + field;
+      return false;
+    }
+  }
+  const char *booleanFields[] = {"autoOffEnabled", "scheduleEnabled"};
+  for (const char *field : booleanFields) {
+    if (!power[field].isNull() && !power[field].is<bool>()) {
+      error = String("Power Safe field must be boolean: ") + field;
+      return false;
+    }
+  }
+  if (!power["timeZone"].isNull() &&
+      !power["timeZone"].is<const char *>()) {
+    error = "Power Safe timeZone must be a string";
+    return false;
+  }
+
+  long startupBrightness =
+      power["startupBrightness"] |
+      static_cast<long>(
+          static_cast<uint8_t>(settings.powerSave.startupBrightness));
+  long autoOffMinutes =
+      power["autoOffMinutes"] |
+      static_cast<long>(settings.powerSave.autoOffMinutes);
+  long nightStartMinute =
+      power["nightStartMinute"] |
+      static_cast<long>(settings.powerSave.nightStartMinute);
+  long nightEndMinute =
+      power["nightEndMinute"] |
+      static_cast<long>(settings.powerSave.nightEndMinute);
+  long nightBrightness =
+      power["nightBrightness"] |
+      static_cast<long>(
+          static_cast<uint8_t>(settings.powerSave.nightBrightness));
+
+  settings.powerSave.startupBrightness =
+      startupBrightness >= 0 && startupBrightness <= UINT8_MAX
+          ? static_cast<BrightnessLevel>(
+                static_cast<uint8_t>(startupBrightness))
+          : static_cast<BrightnessLevel>(UINT8_MAX);
+  settings.powerSave.autoOffEnabled =
+      power["autoOffEnabled"] | settings.powerSave.autoOffEnabled;
+  settings.powerSave.autoOffMinutes =
+      autoOffMinutes >= 0 && autoOffMinutes <= UINT16_MAX
+          ? static_cast<uint16_t>(autoOffMinutes)
+          : 0;
+  settings.powerSave.scheduleEnabled =
+      power["scheduleEnabled"] | settings.powerSave.scheduleEnabled;
+  settings.powerSave.nightStartMinute =
+      nightStartMinute >= 0 && nightStartMinute <= UINT16_MAX
+          ? static_cast<uint16_t>(nightStartMinute)
+          : UINT16_MAX;
+  settings.powerSave.nightEndMinute =
+      nightEndMinute >= 0 && nightEndMinute <= UINT16_MAX
+          ? static_cast<uint16_t>(nightEndMinute)
+          : UINT16_MAX;
+  settings.powerSave.nightBrightness =
+      nightBrightness >= 0 && nightBrightness <= UINT8_MAX
+          ? static_cast<BrightnessLevel>(
+                static_cast<uint8_t>(nightBrightness))
+          : static_cast<BrightnessLevel>(UINT8_MAX);
+  settings.powerSave.timeZone =
+      power["timeZone"] | settings.powerSave.timeZone;
+  return true;
+}
+
 static void handleApiSettings(AsyncWebServerRequest *req) {
   if (!g_cfg) {
     req->send(500, "application/json", "{}");
@@ -79,6 +176,7 @@ static void handleApiSettings(AsyncWebServerRequest *req) {
   addSupportedDisplayRotations(doc);
   doc["colorScheme"] = static_cast<uint8_t>(g_cfg->colorScheme);
   addColorSchemes(doc);
+  addPowerSettings(doc);
   String json;
   serializeJson(doc, json);
   req->send(200, "application/json", json);
@@ -87,6 +185,10 @@ static void handleApiSettings(AsyncWebServerRequest *req) {
 static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   if (!g_cfg) {
     req->send(500, "text/plain", "Internal error");
+    return;
+  }
+  if (otaUpdateBusy()) {
+    req->send(409, "text/plain", "Settings are locked during OTA");
     return;
   }
 
@@ -136,10 +238,14 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
           ? static_cast<ColorScheme>(
                 static_cast<uint8_t>(colorScheme))
           : static_cast<ColorScheme>(UINT8_MAX);
+  String error;
+  if (!readPowerSettings(doc, next, error)) {
+    req->send(400, "text/plain", error);
+    return;
+  }
 
   normalizeSettings(next);
 
-  String error;
   if (!validateSettings(next, &error)) {
     req->send(400, "text/plain", error);
     return;
@@ -198,42 +304,151 @@ static void handleSaveBody(AsyncWebServerRequest *req,
   }
 }
 
-static void handleUpload(AsyncWebServerRequest *req, const String &filename,
-                         size_t index, uint8_t *data, size_t len, bool final) {
-  if (!index) {
-    Serial.printf("[OTA] start update: %s (%u bytes)\n",
-                  filename.c_str(), req->contentLength());
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-      Serial.println("[OTA] not enough space");
-      Update.printError(Serial);
+static String *takeRequestBody(AsyncWebServerRequest *req) {
+  String *body = static_cast<String *>(req->_tempObject);
+  req->_tempObject = nullptr;
+  return body;
+}
+
+static void collectRequestBody(AsyncWebServerRequest *req,
+                               uint8_t *data,
+                               size_t len,
+                               size_t index,
+                               size_t total) {
+  if (total > MAX_SETTINGS_BODY) return;
+  if (index == 0) {
+    if (req->_tempObject) {
+      delete static_cast<String *>(req->_tempObject);
     }
+    auto *body = new String();
+    body->reserve(total + 1);
+    req->_tempObject = body;
   }
-  if (Update.write(data, len) != len) {
-    Update.printError(Serial);
-  }
-  if (final) {
-    if (Update.end(true)) {
-      Serial.printf("[OTA] success, %u bytes\n", req->contentLength());
-      req->send(200, "text/plain", "OK");
-      delay(500);
-      ESP.restart();
-    } else {
-      Serial.print("[OTA] FAILED: ");
-      Update.printError(Serial);
-      req->send(500, "text/plain", "Update failed");
-    }
+  auto *body = static_cast<String *>(req->_tempObject);
+  if (!body) return;
+  for (size_t i = 0; i < len; ++i) {
+    *body += static_cast<char>(data[i]);
   }
 }
 
-static void handlePostResult(AsyncWebServerRequest *req) {
-  bool hasError = Update.hasError();
-  if (!hasError) {
-    req->send(200, "text/plain", "OK");
-    delay(500);
-    ESP.restart();
-  } else {
-    req->send(500, "text/plain", "Update failed");
+static void sendOtaStatus(AsyncWebServerRequest *req, int status = 200) {
+  JsonDocument doc;
+  otaUpdateAddStatus(doc);
+  String json;
+  serializeJson(doc, json);
+  req->send(status, "application/json", json);
+}
+
+static void handleOtaStart(AsyncWebServerRequest *req) {
+  String *body = takeRequestBody(req);
+  if (!body) {
+    req->send(400, "text/plain", "Missing JSON");
+    return;
   }
+  JsonDocument doc;
+  DeserializationError parseError = deserializeJson(doc, *body);
+  delete body;
+  if (parseError) {
+    req->send(400, "text/plain", "Invalid JSON");
+    return;
+  }
+
+  String error;
+  if (!otaUpdateStart(doc, error)) {
+    req->send(otaUpdateBusy() ? 409 : 400, "text/plain", error);
+    return;
+  }
+  sendOtaStatus(req, 202);
+}
+
+static String uploadType(AsyncWebServerRequest *req) {
+  if (!req->hasParam("type")) return "";
+  return req->getParam("type")->value();
+}
+
+static size_t uploadSize(AsyncWebServerRequest *req) {
+  if (!req->hasParam("size")) return 0;
+  return static_cast<size_t>(
+      strtoull(req->getParam("size")->value().c_str(), nullptr, 10));
+}
+
+static void setUploadError(AsyncWebServerRequest *req, const String &error) {
+  if (req->_tempObject) return;
+  req->_tempObject = new String(error);
+}
+
+static void handleOtaUploadData(AsyncWebServerRequest *req,
+                                const String &filename,
+                                size_t index,
+                                uint8_t *data,
+                                size_t len,
+                                bool final) {
+  String type = uploadType(req);
+  if (index == 0) {
+    if (req->_tempObject) {
+      delete static_cast<String *>(req->_tempObject);
+      req->_tempObject = nullptr;
+    }
+    Serial.printf("[OTA] upload %s: %s (%u bytes)\n",
+                  type.c_str(), filename.c_str(),
+                  static_cast<unsigned>(uploadSize(req)));
+    String error;
+    if (!otaUpdateBeginUpload(type, uploadSize(req), error)) {
+      setUploadError(req, error);
+      return;
+    }
+  }
+
+  if (req->_tempObject) return;
+  String error;
+  if (!otaUpdateWrite(type, index, data, len, final, error)) {
+    setUploadError(req, error);
+  }
+}
+
+static void handleOtaUploadResult(AsyncWebServerRequest *req) {
+  String *error = takeRequestBody(req);
+  if (error) {
+    req->send(400, "text/plain", *error);
+    delete error;
+    return;
+  }
+  sendOtaStatus(req);
+}
+
+static void handleOtaCommit(AsyncWebServerRequest *req) {
+  String error;
+  if (!otaUpdateCommit(error)) {
+    req->send(409, "text/plain", error);
+    return;
+  }
+  sendOtaStatus(req);
+}
+
+static void handleOtaCancel(AsyncWebServerRequest *req) {
+  otaUpdateCancel();
+  sendOtaStatus(req);
+}
+
+static void handleOtaRollback(AsyncWebServerRequest *req) {
+  String error;
+  if (!otaUpdateManualRollback(error)) {
+    req->send(409, "text/plain", error);
+    return;
+  }
+  sendOtaStatus(req);
+}
+
+void otaRegisterUpdateRoutes(AsyncWebServer &server) {
+  server.on("/api/ota/status", HTTP_GET,
+            [](AsyncWebServerRequest *req) { sendOtaStatus(req); });
+  server.on("/api/ota/start", HTTP_POST, handleOtaStart, nullptr,
+            collectRequestBody);
+  server.on("/api/ota/upload", HTTP_POST,
+            handleOtaUploadResult, handleOtaUploadData);
+  server.on("/api/ota/commit", HTTP_POST, handleOtaCommit);
+  server.on("/api/ota/cancel", HTTP_POST, handleOtaCancel);
+  server.on("/api/ota/rollback", HTTP_POST, handleOtaRollback);
 }
 
 void otaBegin(Settings &settings) {
@@ -249,6 +464,13 @@ void otaBegin(Settings &settings) {
   });
 
   g_srv->on("/api/settings", HTTP_GET, handleApiSettings);
+  g_srv->on("/api/timezones", HTTP_GET,
+            [](AsyncWebServerRequest *req) {
+              AsyncResponseStream *response =
+                  req->beginResponseStream("application/json");
+              timeServicePrintZones(*response);
+              req->send(response);
+            });
 
   g_srv->on("/save", HTTP_POST, handleSaveRequest, nullptr, handleSaveBody);
   g_srv->on("/save", HTTP_GET, [](AsyncWebServerRequest *req) {
@@ -259,14 +481,28 @@ void otaBegin(Settings &settings) {
     req->send(LittleFS, "/ota/ota.html", "text/html");
   });
 
-  g_srv->on("/update", HTTP_POST, handlePostResult, handleUpload);
+  otaRegisterUpdateRoutes(*g_srv);
 
   g_srv->begin();
   Serial.printf("[OTA] server started on http://%s/\n",
                 WiFi.localIP().toString().c_str());
 }
 
+void otaLoop(const Settings &settings) {
+  otaUpdateLoop();
+  if (otaUpdateTelemetryPauseRequested()) {
+    otaUpdateSetTelemetryPaused(telemetryStop());
+  }
+  if (otaUpdateTelemetryResumeRequested()) {
+    if (telemetryStart(settings)) {
+      otaUpdateSetTelemetryResumed();
+    }
+  }
+}
+
 void otaEnd() {
+  otaUpdateCancel();
+  otaUpdateSetTelemetryResumed();
   if (g_srv) {
     g_srv->end();
     delete g_srv;

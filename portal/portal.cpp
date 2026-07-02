@@ -3,10 +3,12 @@
 #include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
-#include <Update.h>
 #include <LittleFS.h>
 
 #include "portal.h"
+#include "net/ota.h"
+#include "net/ota_update.h"
+#include "net/time_service.h"
 #include "display/color_schemes.h"
 
 static const char *AP_PASSWORD = "12345678";
@@ -17,7 +19,7 @@ static Settings          *g_cfg   = nullptr;
 static bool               g_saved = false;
 static char               g_apName[32];
 
-static constexpr size_t MAX_SETTINGS_BODY = 2048;
+static constexpr size_t MAX_SETTINGS_BODY = 4096;
 
 enum ScanState { IDLE, REQUESTED, DONE };
 static ScanState g_scanState = IDLE;
@@ -51,9 +53,107 @@ static void addDisplaySettings(JsonDocument &doc) {
   }
 }
 
+static void addPowerSettings(JsonDocument &doc) {
+  const PowerSaveSettings power =
+      g_cfg ? g_cfg->powerSave : PowerSaveSettings{};
+  JsonObject object = doc["powerSafe"].to<JsonObject>();
+  object["startupBrightness"] =
+      static_cast<uint8_t>(power.startupBrightness);
+  object["autoOffEnabled"] = power.autoOffEnabled;
+  object["autoOffMinutes"] = power.autoOffMinutes;
+  object["scheduleEnabled"] = power.scheduleEnabled;
+  object["nightStartMinute"] = power.nightStartMinute;
+  object["nightEndMinute"] = power.nightEndMinute;
+  object["nightBrightness"] =
+      static_cast<uint8_t>(power.nightBrightness);
+  object["timeZone"] = power.timeZone;
+}
+
+static bool readPowerSettings(const JsonDocument &doc,
+                              Settings &settings,
+                              String &error) {
+  JsonVariantConst value = doc["powerSafe"];
+  if (value.isNull()) return true;
+  if (!value.is<JsonObjectConst>()) {
+    error = "Power Safe must be an object";
+    return false;
+  }
+  JsonObjectConst power = value.as<JsonObjectConst>();
+  const char *numericFields[] = {
+      "startupBrightness", "autoOffMinutes", "nightStartMinute",
+      "nightEndMinute", "nightBrightness"};
+  for (const char *field : numericFields) {
+    if (!power[field].isNull() && !power[field].is<long>()) {
+      error = String("Power Safe field must be an integer: ") + field;
+      return false;
+    }
+  }
+  const char *booleanFields[] = {"autoOffEnabled", "scheduleEnabled"};
+  for (const char *field : booleanFields) {
+    if (!power[field].isNull() && !power[field].is<bool>()) {
+      error = String("Power Safe field must be boolean: ") + field;
+      return false;
+    }
+  }
+  if (!power["timeZone"].isNull() &&
+      !power["timeZone"].is<const char *>()) {
+    error = "Power Safe timeZone must be a string";
+    return false;
+  }
+
+  long startupBrightness =
+      power["startupBrightness"] |
+      static_cast<long>(
+          static_cast<uint8_t>(settings.powerSave.startupBrightness));
+  long autoOffMinutes =
+      power["autoOffMinutes"] |
+      static_cast<long>(settings.powerSave.autoOffMinutes);
+  long nightStartMinute =
+      power["nightStartMinute"] |
+      static_cast<long>(settings.powerSave.nightStartMinute);
+  long nightEndMinute =
+      power["nightEndMinute"] |
+      static_cast<long>(settings.powerSave.nightEndMinute);
+  long nightBrightness =
+      power["nightBrightness"] |
+      static_cast<long>(
+          static_cast<uint8_t>(settings.powerSave.nightBrightness));
+
+  settings.powerSave.startupBrightness =
+      startupBrightness >= 0 && startupBrightness <= UINT8_MAX
+          ? static_cast<BrightnessLevel>(
+                static_cast<uint8_t>(startupBrightness))
+          : static_cast<BrightnessLevel>(UINT8_MAX);
+  settings.powerSave.autoOffEnabled =
+      power["autoOffEnabled"] | settings.powerSave.autoOffEnabled;
+  settings.powerSave.autoOffMinutes =
+      autoOffMinutes >= 0 && autoOffMinutes <= UINT16_MAX
+          ? static_cast<uint16_t>(autoOffMinutes)
+          : 0;
+  settings.powerSave.scheduleEnabled =
+      power["scheduleEnabled"] | settings.powerSave.scheduleEnabled;
+  settings.powerSave.nightStartMinute =
+      nightStartMinute >= 0 && nightStartMinute <= UINT16_MAX
+          ? static_cast<uint16_t>(nightStartMinute)
+          : UINT16_MAX;
+  settings.powerSave.nightEndMinute =
+      nightEndMinute >= 0 && nightEndMinute <= UINT16_MAX
+          ? static_cast<uint16_t>(nightEndMinute)
+          : UINT16_MAX;
+  settings.powerSave.nightBrightness =
+      nightBrightness >= 0 && nightBrightness <= UINT8_MAX
+          ? static_cast<BrightnessLevel>(
+                static_cast<uint8_t>(nightBrightness))
+          : static_cast<BrightnessLevel>(UINT8_MAX);
+  settings.powerSave.timeZone =
+      power["timeZone"] | settings.powerSave.timeZone;
+  return true;
+}
+
 static void handleApiSettings(AsyncWebServerRequest *req) {
   JsonDocument doc;
   addDisplaySettings(doc);
+  addPowerSettings(doc);
   String json;
   serializeJson(doc, json);
   req->send(200, "application/json", json);
@@ -74,6 +174,10 @@ static void handleScan(AsyncWebServerRequest *req) {
 static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   if (!g_cfg) {
     req->send(500, "text/plain", "Internal error");
+    return;
+  }
+  if (otaUpdateBusy()) {
+    req->send(409, "text/plain", "Settings are locked during OTA");
     return;
   }
 
@@ -126,11 +230,15 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
           ? static_cast<ColorScheme>(
                 static_cast<uint8_t>(colorScheme))
           : static_cast<ColorScheme>(UINT8_MAX);
+  String error;
+  if (!readPowerSettings(doc, next, error)) {
+    req->send(400, "text/plain", error);
+    return;
+  }
   next.configured        = true;
 
   normalizeSettings(next);
 
-  String error;
   if (!validateSettings(next, &error)) {
     req->send(400, "text/plain", error);
     return;
@@ -209,6 +317,13 @@ void portalBegin(Settings &settings) {
 
   g_http = new AsyncWebServer(80);
   g_http->on("/api/settings", HTTP_GET, handleApiSettings);
+  g_http->on("/api/timezones", HTTP_GET,
+    [](AsyncWebServerRequest *req) {
+      AsyncResponseStream *response =
+          req->beginResponseStream("application/json");
+      timeServicePrintZones(*response);
+      req->send(response);
+    });
   g_http->on("/scan", HTTP_GET, handleScan);
   g_http->on("/save", HTTP_POST, handleSaveRequest, nullptr, handleSaveBody);
   g_http->on("/save", HTTP_GET, [](AsyncWebServerRequest *req) {
@@ -226,27 +341,7 @@ void portalBegin(Settings &settings) {
   g_http->on("/ota", HTTP_GET, [](AsyncWebServerRequest *req) {
     req->send(LittleFS, "/ota/ota.html", "text/html");
   });
-  g_http->on("/update", HTTP_POST,
-    [](AsyncWebServerRequest *req) {
-      if (Update.hasError()) {
-        req->send(500, "text/plain", "Update failed");
-      } else {
-        req->send(200, "text/plain", "OK");
-        delay(500);
-        ESP.restart();
-      }
-    },
-    [](AsyncWebServerRequest *req, const String &filename,
-       size_t index, uint8_t *data, size_t len, bool final) {
-      if (!index) {
-        Serial.printf("[OTA] portal upload: %s (%u bytes)\n",
-                      filename.c_str(), req->contentLength());
-        Update.begin(UPDATE_SIZE_UNKNOWN);
-      }
-      Update.write(data, len);
-      if (final) Update.end(true);
-    }
-  );
+  otaRegisterUpdateRoutes(*g_http);
 
   g_http->begin();
 
@@ -255,6 +350,13 @@ void portalBegin(Settings &settings) {
 
 void portalLoop() {
   if (g_dns) g_dns->processNextRequest();
+  otaUpdateLoop();
+  if (otaUpdateTelemetryPauseRequested()) {
+    otaUpdateSetTelemetryPaused(true);
+  }
+  if (otaUpdateTelemetryResumeRequested()) {
+    otaUpdateSetTelemetryResumed();
+  }
   if (g_scanState == REQUESTED) {
     int n = WiFi.scanNetworks(false, true, false, 300);
     JsonDocument doc;
@@ -278,6 +380,8 @@ bool portalConfigSaved() {
 }
 
 void portalEnd() {
+  otaUpdateCancel();
+  otaUpdateSetTelemetryResumed();
   if (g_http) { g_http->end(); delete g_http; g_http = nullptr; }
   if (g_dns)  { delete g_dns; g_dns = nullptr; }
   WiFi.softAPdisconnect(true);

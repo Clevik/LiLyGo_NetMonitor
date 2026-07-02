@@ -24,9 +24,7 @@ static char g_fmtBuf[32];
 static char g_connectSsid[64];
 static char g_routerIp[20] = "192.168.1.1";
 
-static constexpr uint8_t BRIGHTNESS_LEVELS[] = {0xFF, 0xBF, 0x80, 0x4D, 0x00};
-static constexpr uint8_t BRIGHTNESS_COUNT = 5;
-static uint8_t g_brightnessIdx = 0;
+static BrightnessLevel g_brightness = BrightnessLevel::Full;
 static bool g_redrawRequested = false;
 
 constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
@@ -192,9 +190,12 @@ static void pushPingHistory(const Telemetry &t) {
 }
 #endif
 
-bool uiInit(uint16_t displayRotation, ColorScheme colorScheme) {
+bool uiInit(uint16_t displayRotation,
+            ColorScheme colorScheme,
+            BrightnessLevel startupBrightness) {
   if (!isDisplayRotationSupported(displayRotation) ||
-      !setActiveColorScheme(colorScheme)) {
+      !setActiveColorScheme(colorScheme) ||
+      !isBrightnessLevelSupported(startupBrightness, false)) {
     return false;
   }
 
@@ -235,6 +236,7 @@ bool uiInit(uint16_t displayRotation, ColorScheme colorScheme) {
 
   g_canvas->fillScreen(CLR_BG);
   g_canvas->flush();
+  uiSetBrightness(startupBrightness);
   g_canvas->setTextColor(CLR_TEXT, CLR_BG);
   return true;
 }
@@ -1689,7 +1691,7 @@ void uiShowMain(const Telemetry &t) {
 }
 
 #if defined(HW_AMOLED_143)
-void uiHandleTap(int16_t x, int16_t y) {
+bool uiHandleTap(int16_t x, int16_t y) {
   int32_t dx = static_cast<int32_t>(x) - RoundLayout::CENTER_X;
   int32_t dy = static_cast<int32_t>(y) - RoundLayout::GLOBE_CENTER_Y;
   int32_t distanceSquared = dx * dx + dy * dy;
@@ -1707,15 +1709,15 @@ void uiHandleTap(int16_t x, int16_t y) {
     g_redrawRequested = true;
     Serial.printf("[UI] globe animation -> %s\n",
                   g_globeAnimationRunning ? "running" : "paused");
-    return;
+    return false;
   }
 
-  uiCycleBrightness();
+  return true;
 }
 #endif
 
 bool uiDisplayEnabled() {
-  return BRIGHTNESS_LEVELS[g_brightnessIdx] > 0;
+  return g_brightness != BrightnessLevel::Off;
 }
 
 bool uiConsumeRedrawRequest() {
@@ -1724,10 +1726,19 @@ bool uiConsumeRedrawRequest() {
   return requested;
 }
 
-void uiCycleBrightness() {
+void uiSetBrightness(BrightnessLevel level) {
+  if (!g_bus || !isBrightnessLevelSupported(level, true)) return;
+
   bool wasEnabled = uiDisplayEnabled();
-  g_brightnessIdx = (g_brightnessIdx + 1) % BRIGHTNESS_COUNT;
-  uint8_t val = BRIGHTNESS_LEVELS[g_brightnessIdx];
+  uint8_t val = 0;
+  switch (level) {
+    case BrightnessLevel::Quarter:       val = 0x40; break;
+    case BrightnessLevel::Half:          val = 0x80; break;
+    case BrightnessLevel::ThreeQuarters: val = 0xBF; break;
+    case BrightnessLevel::Full:          val = 0xFF; break;
+    case BrightnessLevel::Off:           val = 0x00; break;
+  }
+
   g_bus->beginWrite();
   g_bus->writeC8D8(DISP_CMD_BRIGHTNESS, val);
   if (val > 0) {
@@ -1736,8 +1747,14 @@ void uiCycleBrightness() {
     g_bus->writeCommand(DISP_CMD_DISPOFF);
   }
   g_bus->endWrite();
+  g_brightness = level;
   if (!wasEnabled && val > 0) {
     g_redrawRequested = true;
   }
-  Serial.printf("[UI] brightness -> %d (0x%02X)\n", g_brightnessIdx, val);
+  Serial.printf("[UI] brightness -> %u%% (0x%02X)\n",
+                static_cast<unsigned>(level), val);
+}
+
+BrightnessLevel uiBrightness() {
+  return g_brightness;
 }

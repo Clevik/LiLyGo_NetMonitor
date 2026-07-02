@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include "settings.h"
+#include "net/time_service.h"
 
 static bool hasText(const String &value) {
   for (size_t i = 0; i < value.length(); ++i) {
@@ -127,12 +128,49 @@ static bool reject(String *error, const char *message) {
   return false;
 }
 
+static bool isValidTimeZoneName(const String &value) {
+  if (value.length() == 0 || value.length() > 63) return false;
+  for (size_t i = 0; i < value.length(); ++i) {
+    char c = value.charAt(i);
+    if (!isAlphaNumChar(c) && c != '/' && c != '_' &&
+        c != '-' && c != '+') {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool validatePowerSettings(const PowerSaveSettings &settings,
+                                  String *error) {
+  if (!isBrightnessLevelSupported(settings.startupBrightness, false)) {
+    return reject(error, "Startup Brightness must be 25, 50, 75 or 100");
+  }
+  if (!isBrightnessLevelSupported(settings.nightBrightness, true)) {
+    return reject(error, "Night Brightness must be 0, 25, 50, 75 or 100");
+  }
+  if (settings.autoOffMinutes < 1 || settings.autoOffMinutes > 1440) {
+    return reject(error, "Screen Off Timeout must be 1..1440 min");
+  }
+  if (settings.nightStartMinute > 1439 ||
+      settings.nightEndMinute > 1439) {
+    return reject(error, "Brightness Schedule time is invalid");
+  }
+  if (!isValidTimeZoneName(settings.timeZone)) {
+    return reject(error, "Time Zone must be a valid IANA name");
+  }
+  if (!timeServiceIsZoneSupported(settings.timeZone)) {
+    return reject(error, "Time Zone is not supported");
+  }
+  return true;
+}
+
 void normalizeSettings(Settings &settings) {
   settings.routerHost.trim();
   settings.snmpCommunity.trim();
   settings.pingHost.trim();
   settings.ifName.trim();
   settings.routerApiLogin.trim();
+  settings.powerSave.timeZone.trim();
 }
 
 bool validateSettings(const Settings &settings, String *error) {
@@ -186,12 +224,86 @@ bool validateSettings(const Settings &settings, String *error) {
       settings.wifiRetryDelaySec > SETTINGS_WIFI_RETRY_MAX_SEC) {
     return reject(error, "Wi-Fi Retry Delay must be 1..3600 sec");
   }
+  if (!validatePowerSettings(settings.powerSave, error)) {
+    return false;
+  }
   return true;
 }
 
 namespace SettingsStore {
 
 static constexpr const char *KEY_SCHEMA_VERSION = "schemaVersion";
+static constexpr const char *POWER_NAMESPACE = "netmon_power";
+
+static void loadPowerSettings(PowerSaveSettings &out) {
+  Preferences prefs;
+  if (!prefs.begin(POWER_NAMESPACE, true)) return;
+
+  uint8_t version = prefs.getUChar("ver", 0);
+  if (version == 0) {
+    prefs.end();
+    return;
+  }
+  if (version != POWER_SETTINGS_SCHEMA_VERSION) {
+    prefs.end();
+    Serial.printf("[Settings] unsupported Power Safe schema: %u\n",
+                  static_cast<unsigned>(version));
+    out = PowerSaveSettings{};
+    return;
+  }
+
+  out.startupBrightness = static_cast<BrightnessLevel>(
+      prefs.getUChar("startup", 100));
+  out.autoOffEnabled = prefs.getBool("autoOff", false);
+  out.autoOffMinutes = prefs.getUShort("offMin", 5);
+  out.scheduleEnabled = prefs.getBool("sched", false);
+  out.nightStartMinute = prefs.getUShort("nStart", 23 * 60);
+  out.nightEndMinute = prefs.getUShort("nEnd", 7 * 60);
+  out.nightBrightness = static_cast<BrightnessLevel>(
+      prefs.getUChar("nBright", 25));
+  out.timeZone = prefs.getString("tz", "Europe/Moscow");
+  prefs.end();
+
+  if (!isValidTimeZoneName(out.timeZone) ||
+      !timeServiceIsZoneSupported(out.timeZone)) {
+    Serial.printf("[Settings] unsupported saved time zone %s; using Europe/Moscow\n",
+                  out.timeZone.c_str());
+    out.timeZone = "Europe/Moscow";
+  }
+
+  String error;
+  if (!validatePowerSettings(out, &error)) {
+    Serial.printf("[Settings] invalid Power Safe config: %s; using defaults\n",
+                  error.c_str());
+    out = PowerSaveSettings{};
+  }
+}
+
+static bool savePowerSettings(const PowerSaveSettings &settings) {
+  String error;
+  if (!validatePowerSettings(settings, &error)) {
+    Serial.printf("[Settings] Power Safe save rejected: %s\n", error.c_str());
+    return false;
+  }
+
+  Preferences prefs;
+  if (!prefs.begin(POWER_NAMESPACE, false)) return false;
+  bool ok = true;
+  ok = ok && prefs.putUChar("ver", POWER_SETTINGS_SCHEMA_VERSION) == 1;
+  ok = ok && prefs.putUChar(
+      "startup", static_cast<uint8_t>(settings.startupBrightness)) == 1;
+  ok = ok && prefs.putBool("autoOff", settings.autoOffEnabled) == 1;
+  ok = ok && prefs.putUShort("offMin", settings.autoOffMinutes) == 2;
+  ok = ok && prefs.putBool("sched", settings.scheduleEnabled) == 1;
+  ok = ok && prefs.putUShort("nStart", settings.nightStartMinute) == 2;
+  ok = ok && prefs.putUShort("nEnd", settings.nightEndMinute) == 2;
+  ok = ok && prefs.putUChar(
+      "nBright", static_cast<uint8_t>(settings.nightBrightness)) == 1;
+  ok = ok && prefs.putString("tz", settings.timeZone) ==
+                 settings.timeZone.length();
+  prefs.end();
+  return ok;
+}
 
 bool load(Settings &out) {
   Preferences prefs;
@@ -234,6 +346,7 @@ bool load(Settings &out) {
       "theme", static_cast<uint8_t>(DEFAULT_COLOR_SCHEME)));
 
   prefs.end();
+  loadPowerSettings(out.powerSave);
 
   out.configured     = true;
   if (!isDisplayRotationSupported(out.displayRotation)) {
@@ -296,12 +409,15 @@ bool save(const Settings &in) {
   prefs.putUChar("theme",  static_cast<uint8_t>(stored.colorScheme));
 
   prefs.end();
-  return true;
+  return savePowerSettings(stored.powerSave);
 }
 
 void clear() {
   Preferences prefs;
   prefs.begin("netmon", false);
+  prefs.clear();
+  prefs.end();
+  prefs.begin(POWER_NAMESPACE, false);
   prefs.clear();
   prefs.end();
 }

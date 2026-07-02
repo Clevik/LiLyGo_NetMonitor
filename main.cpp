@@ -4,10 +4,13 @@
 
 #include "config.h"
 #include "settings.h"
+#include "display/power_manager.h"
 #include "display/ui.h"
 #include "portal/portal.h"
 #include "net/ota.h"
+#include "net/ota_state.h"
 #include "net/telemetry.h"
+#include "net/time_service.h"
 #include "touch/touch.h"
 
 enum class AppState : uint8_t {
@@ -20,11 +23,13 @@ enum class AppState : uint8_t {
 static AppState   g_state = AppState::Boot;
 static Settings   g_settings;
 static Telemetry  g_telemetry;
+static bool       g_filesystemReady = false;
 
 static uint32_t   g_stateEnteredMs = 0;
 static uint32_t   g_lastUiMs       = 0;
 static uint32_t   g_lastTelemetryMs = 0;
 static uint32_t   g_keyDownMs      = 0;
+static bool       g_keyWakeOnly    = false;
 
 #if defined(HW_AMOLED_143)
 static constexpr uint32_t UI_RUNNING_FRAME_MS = UI_ROUND_FRAME_MS;
@@ -74,6 +79,7 @@ static void enterState(AppState next) {
       g_lastUiMs = 0;
       g_lastTelemetryMs = 0;
       otaBegin(g_settings);
+      timeServiceBegin(g_settings.powerSave.timeZone);
       uiSetRouterIp(g_settings.routerHost.c_str());
       if (!telemetryStart(g_settings)) {
         Serial.println("[FSM] telemetry start skipped");
@@ -89,13 +95,18 @@ static void enterState(AppState next) {
 static bool keyLongPressed() {
   bool pressed = (digitalRead(PIN_KEY) == LOW);
   if (pressed) {
-    if (g_keyDownMs == 0) g_keyDownMs = millis();
-    if (millis() - g_keyDownMs >= KEY_LONG_PRESS_MS) {
+    if (g_keyDownMs == 0) {
+      g_keyDownMs = millis();
+      g_keyWakeOnly = powerManagerHandleActivity(g_keyDownMs);
+    }
+    if (!g_keyWakeOnly &&
+        millis() - g_keyDownMs >= KEY_LONG_PRESS_MS) {
       g_keyDownMs = 0;
       return true;
     }
   } else {
     g_keyDownMs = 0;
+    g_keyWakeOnly = false;
   }
   return false;
 }
@@ -105,10 +116,21 @@ void setup() {
   delay(200);
   Serial.println("\n[NETMONITOR] boot");
 
+  OtaFsSlot fsSlot = OtaFsSlot::Fs0;
+  otaStatePrepareBoot(fsSlot);
+
   bool haveConfig = SettingsStore::load(g_settings);
 
-  if (!LittleFS.begin(true)) {
+  if (!LittleFS.begin(false, "/littlefs", 10,
+                      otaFsPartitionLabel(fsSlot))) {
     Serial.println("[FS] LittleFS mount failed");
+    otaStateHandleFilesystemFailure();
+  } else if (!otaStateValidateFilesystem(LittleFS)) {
+    Serial.println("[FS] LittleFS validation failed");
+    LittleFS.end();
+    otaStateHandleFilesystemFailure();
+  } else {
+    g_filesystemReady = true;
   }
 
   pinMode(PIN_KEY, INPUT_PULLUP);
@@ -117,7 +139,9 @@ void setup() {
   touchInit(g_settings.displayRotation);
 #endif
 
-  if (!uiInit(g_settings.displayRotation, g_settings.colorScheme)) {
+  if (!uiInit(g_settings.displayRotation,
+              g_settings.colorScheme,
+              g_settings.powerSave.startupBrightness)) {
     Serial.println("[UI] display init failed, halting");
     while (true) delay(1000);
   }
@@ -129,6 +153,7 @@ void setup() {
   }
 #endif
 
+  powerManagerBegin(g_settings.powerSave, millis());
   uiShowSplash();
   delay(1500);
 
@@ -137,6 +162,8 @@ void setup() {
 
 void loop() {
   const uint32_t now = millis();
+  otaStateTick(now, g_filesystemReady);
+  powerManagerTick(now);
 
   if (g_state == AppState::Running || g_state == AppState::WifiConnect) {
     if (keyLongPressed()) {
@@ -145,11 +172,26 @@ void loop() {
       g_settings = Settings{};
       uiApplyDisplaySettings(g_settings.displayRotation,
                              g_settings.colorScheme);
+      powerManagerApplySettings(g_settings.powerSave, now);
       touchSetRotation(g_settings.displayRotation);
       WiFi.disconnect(true, true);
       enterState(AppState::ApConfig);
       return;
     }
+  }
+
+  if (g_state != AppState::Running) {
+#if defined(HW_AMOLED_143)
+    int16_t touchX = 0;
+    int16_t touchY = 0;
+    if (touchReadTap(touchX, touchY)) {
+      powerManagerHandleActivity(now);
+    }
+#else
+    if (touchButtonPressed()) {
+      powerManagerHandleActivity(now);
+    }
+#endif
   }
 
   switch (g_state) {
@@ -160,6 +202,7 @@ void loop() {
         SettingsStore::save(g_settings);
         uiApplyDisplaySettings(g_settings.displayRotation,
                                g_settings.colorScheme);
+        powerManagerApplySettings(g_settings.powerSave, now);
         touchSetRotation(g_settings.displayRotation);
         enterState(AppState::WifiConnect);
       }
@@ -213,11 +256,13 @@ void loop() {
     }
 
     case AppState::Running: {
+      otaLoop(g_settings);
       if (otaSettingsSaved()) {
         Serial.println("[OTA] settings saved");
         SettingsStore::save(g_settings);
         uiApplyDisplaySettings(g_settings.displayRotation,
                                g_settings.colorScheme);
+        powerManagerApplySettings(g_settings.powerSave, now);
         touchSetRotation(g_settings.displayRotation);
         if (otaTelemetrySettingsChanged()) {
           Serial.println("[OTA] telemetry settings changed, restarting telemetry...");
@@ -244,12 +289,17 @@ void loop() {
         int16_t touchX = 0;
         int16_t touchY = 0;
         if (touchReadTap(touchX, touchY)) {
-          uiHandleTap(touchX, touchY);
+          bool wakeConsumed = powerManagerHandleActivity(now);
+          if (!wakeConsumed && uiHandleTap(touchX, touchY)) {
+            powerManagerCycleManualBrightness(now);
+          }
         }
       }
 #else
       if (touchButtonPressed()) {
-        uiCycleBrightness();
+        if (!powerManagerHandleActivity(now)) {
+          powerManagerCycleManualBrightness(now);
+        }
       }
 #endif
 

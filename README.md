@@ -40,6 +40,10 @@ screen as "OTA") where you can adjust SNMP and ping settings without
 re-entering Wi-Fi credentials. Firmware OTA updates are also available at
 `/ota`.
 
+The `Power Safe` section provides startup brightness, screen auto-off, one
+night brightness period, and a searchable IANA time-zone list. Brightness uses
+25% steps; monitoring and OTA continue while the display is off.
+
 ### Controls
 
 | Action | Function |
@@ -54,6 +58,29 @@ pio run -t upload                  # build and flash via USB
 pio run -t upload -t monitor       # flash + serial monitor
 pio device monitor                 # serial monitor only
 ```
+
+The dual-slot OTA layout uses two application partitions and two LittleFS
+partitions. Migrating a device from the previous single-LittleFS layout requires
+one full USB reflash:
+
+```bash
+pio run -t erase
+pio run -t uploadfs
+pio run -t upload
+```
+
+The partition table itself is not migrated by a regular OTA update.
+
+Build artifacts for browser OTA:
+
+```text
+.pio/build/<environment>/firmware.bin
+.pio/build/<environment>/littlefs.bin
+```
+
+The OTA page supports firmware-only updates and atomic firmware + LittleFS
+updates. A candidate release is confirmed after a healthy boot; otherwise both
+the application and its selected filesystem are rolled back.
 
 ### Setup Guides
 
@@ -70,6 +97,11 @@ pio device monitor                 # serial monitor only
 | SNMP Port | 161 | Router SNMP port |
 | RCI Poll Interval | 15 sec | How often to request Keenetic WAN state and uptime |
 | Wi-Fi Retry Delay | 20 sec | Wait between Wi-Fi reconnection attempts |
+| Startup Brightness | 100% | Normal brightness after boot |
+| Screen Auto-off | Disabled | Optional inactivity timeout |
+| Night Schedule | Disabled | One local-time night period |
+| Night Brightness | 25% | Supports 0/25/50/75/100% |
+| Time Zone | `Europe/Moscow` | IANA zone with TZDB/DST rules |
 
 ---
 
@@ -111,6 +143,11 @@ pio device monitor                 # serial monitor only
 без повторного ввода данных Wi-Fi. Прошивка по воздуху (OTA) доступна по адресу
 `/ota`.
 
+В разделе `Power Safe` настраиваются стартовая яркость, автовыключение экрана,
+один ночной период и часовой пояс из стандартного списка IANA. Яркость
+задаётся с шагом 25%; мониторинг и OTA продолжают работать при выключенном
+дисплее.
+
 ### Управление
 
 | Действие | Функция |
@@ -125,6 +162,29 @@ pio run -t upload                  # сборка и прошивка через
 pio run -t upload -t monitor       # прошивка + последовательный монитор
 pio device monitor                 # только монитор порта
 ```
+
+Для OTA с откатом используются два раздела приложения и два раздела LittleFS.
+Переход со старой разметки с одним LittleFS требует однократной полной прошивки
+по USB:
+
+```bash
+pio run -t erase
+pio run -t uploadfs
+pio run -t upload
+```
+
+Обычное OTA-обновление не заменяет таблицу разделов.
+
+Артефакты для загрузки через веб-интерфейс:
+
+```text
+.pio/build/<окружение>/firmware.bin
+.pio/build/<окружение>/littlefs.bin
+```
+
+OTA-страница поддерживает обновление только прошивки и атомарное обновление
+прошивки вместе с LittleFS. Новый релиз подтверждается после успешной загрузки;
+при сбое приложение и выбранная файловая система откатываются вместе.
 
 ### Инструкции по настройке
 
@@ -141,3 +201,8 @@ pio device monitor                 # только монитор порта
 | Порт SNMP | 161 | Порт SNMP на роутере |
 | Интервал RCI | 15 сек | Частота запроса состояния и UPTIME WAN Keenetic |
 | Задержка реконнекта Wi-Fi | 20 сек | Пауза между попытками переподключения к Wi-Fi |
+| Стартовая яркость | 100% | Обычная яркость после запуска |
+| Автовыключение экрана | Выключено | Опциональный таймер бездействия |
+| Ночное расписание | Выключено | Один период по локальному времени |
+| Ночная яркость | 25% | Допустимы 0/25/50/75/100% |
+| Часовой пояс | `Europe/Moscow` | IANA-зона с правилами TZDB/DST |

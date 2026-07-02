@@ -39,7 +39,9 @@ struct Telemetry {
   bool     dataValid      = false;
 };
 
-bool uiInit(uint16_t displayRotation, ColorScheme colorScheme);
+bool uiInit(uint16_t displayRotation,
+            ColorScheme colorScheme,
+            BrightnessLevel startupBrightness);
 bool uiApplyDisplaySettings(uint16_t displayRotation,
                             ColorScheme colorScheme);
 void uiShowSplash();
@@ -51,8 +53,9 @@ void uiSetRouterIp(const char *ip);
 void uiObserveTelemetry(const Telemetry &t);
 void uiShowMain(const Telemetry &t);
 #if defined(HW_AMOLED_143)
-void uiHandleTap(int16_t x, int16_t y);
+bool uiHandleTap(int16_t x, int16_t y);
 #endif
-void uiCycleBrightness();
+void uiSetBrightness(BrightnessLevel level);
+BrightnessLevel uiBrightness();
 bool uiDisplayEnabled();
 bool uiConsumeRedrawRequest();
