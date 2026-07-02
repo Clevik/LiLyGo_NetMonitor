@@ -22,6 +22,23 @@ enum ScanState { IDLE, REQUESTED, DONE };
 static ScanState g_scanState = IDLE;
 static String    g_scanJson;
 
+static void addDisplaySettings(JsonDocument &doc) {
+  doc["rotation"] = g_cfg ? g_cfg->displayRotation
+                           : DEFAULT_DISPLAY_ROTATION;
+  JsonArray rotations = doc["supportedRotations"].to<JsonArray>();
+  for (size_t i = 0; i < SUPPORTED_DISPLAY_ROTATION_COUNT; ++i) {
+    rotations.add(SUPPORTED_DISPLAY_ROTATIONS[i]);
+  }
+}
+
+static void handleApiSettings(AsyncWebServerRequest *req) {
+  JsonDocument doc;
+  addDisplaySettings(doc);
+  String json;
+  serializeJson(doc, json);
+  req->send(200, "application/json", json);
+}
+
 static void handleScan(AsyncWebServerRequest *req) {
   if (g_scanState == DONE) {
     g_scanState = IDLE;
@@ -67,6 +84,8 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   long pingIntervalSec   = doc["pintv"]  | 5L;
   long updateIntervalSec = doc["intv"]   | 5L;
   long wifiRetryDelaySec = doc["wretry"] | 20L;
+  long displayRotation   = doc["rotation"] |
+                           static_cast<long>(DEFAULT_DISPLAY_ROTATION);
   next.snmpPort          = (snmpPort >= 1 && snmpPort <= 65535)
                              ? static_cast<uint16_t>(snmpPort) : 0;
   next.ifIndex           = ifIndex > 0 ? static_cast<uint32_t>(ifIndex) : 0;
@@ -74,6 +93,10 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   next.pingIntervalSec   = static_cast<uint32_t>(pingIntervalSec);
   next.updateIntervalSec = static_cast<uint32_t>(updateIntervalSec);
   next.wifiRetryDelaySec = static_cast<uint32_t>(wifiRetryDelaySec);
+  next.displayRotation   =
+      (displayRotation >= 0 && displayRotation <= UINT16_MAX)
+          ? static_cast<uint16_t>(displayRotation)
+          : UINT16_MAX;
   next.configured        = true;
 
   normalizeSettings(next);
@@ -156,12 +179,13 @@ void portalBegin(Settings &settings) {
   g_dns->start(53, "*", WiFi.softAPIP());
 
   g_http = new AsyncWebServer(80);
-  g_http->serveStatic("/", LittleFS, "/portal/").setDefaultFile("index.html");
+  g_http->on("/api/settings", HTTP_GET, handleApiSettings);
   g_http->on("/scan", HTTP_GET, handleScan);
   g_http->on("/save", HTTP_POST, handleSaveRequest, nullptr, handleSaveBody);
   g_http->on("/save", HTTP_GET, [](AsyncWebServerRequest *req) {
     req->redirect("/");
   });
+  g_http->serveStatic("/", LittleFS, "/portal/").setDefaultFile("index.html");
   g_http->onNotFound([](AsyncWebServerRequest *req) {
     if (req->method() == HTTP_GET) {
       req->redirect("http://" + WiFi.softAPIP().toString() + "/");

@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "settings.h"
 #if defined(HW_AMOLED_143)
   #include "globe_frames.h"
   #include "internet_icon.h"
@@ -139,7 +140,7 @@ static void pushPingHistory(const Telemetry &t) {
 }
 #endif
 
-bool uiInit() {
+bool uiInit(uint16_t displayRotation) {
   Serial.printf("[UI] canvas need: %ux%u RGB565 = %u bytes\n",
         static_cast<unsigned>(SCREEN_W),
         static_cast<unsigned>(SCREEN_H),
@@ -163,6 +164,7 @@ bool uiInit() {
 #endif
 
   g_canvas = new Arduino_Canvas(SCREEN_W, SCREEN_H, g_disp);
+  g_canvas->setRotation(static_cast<uint8_t>(displayRotation / 90));
   if (!g_canvas->begin()) {
     Serial.printf("[UI] canvas->begin() failed: need %u bytes, psram found=%s\n",
           static_cast<unsigned>(CANVAS_BUFFER_BYTES),
@@ -177,6 +179,20 @@ bool uiInit() {
   g_canvas->fillScreen(CLR_BG);
   g_canvas->flush();
   g_canvas->setTextColor(CLR_TEXT, CLR_BG);
+  return true;
+}
+
+bool uiSetRotation(uint16_t displayRotation) {
+  if (!g_canvas || !isDisplayRotationSupported(displayRotation)) {
+    return false;
+  }
+
+  g_canvas->setRotation(static_cast<uint8_t>(displayRotation / 90));
+  g_canvas->fillScreen(CLR_BG);
+  g_canvas->flush();
+  g_redrawRequested = true;
+  Serial.printf("[UI] display rotation -> %u degrees\n",
+                static_cast<unsigned>(displayRotation));
   return true;
 }
 

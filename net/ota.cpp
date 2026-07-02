@@ -12,6 +12,30 @@ static constexpr size_t MAX_SETTINGS_BODY = 2048;
 static AsyncWebServer *g_srv   = nullptr;
 static Settings       *g_cfg   = nullptr;
 static bool            g_saved = false;
+static bool            g_telemetrySettingsChanged = false;
+
+static bool telemetrySettingsEqual(const Settings &left,
+                                   const Settings &right) {
+  return left.routerHost == right.routerHost &&
+         left.snmpPort == right.snmpPort &&
+         left.snmpVersion == right.snmpVersion &&
+         left.snmpCommunity == right.snmpCommunity &&
+         left.ifIndex == right.ifIndex &&
+         left.ifName == right.ifName &&
+         left.routerApiLogin == right.routerApiLogin &&
+         left.routerApiPassword == right.routerApiPassword &&
+         left.rciIntervalSec == right.rciIntervalSec &&
+         left.pingHost == right.pingHost &&
+         left.pingIntervalSec == right.pingIntervalSec &&
+         left.updateIntervalSec == right.updateIntervalSec;
+}
+
+static void addSupportedDisplayRotations(JsonDocument &doc) {
+  JsonArray rotations = doc["supportedRotations"].to<JsonArray>();
+  for (size_t i = 0; i < SUPPORTED_DISPLAY_ROTATION_COUNT; ++i) {
+    rotations.add(SUPPORTED_DISPLAY_ROTATIONS[i]);
+  }
+}
 
 static void handleApiSettings(AsyncWebServerRequest *req) {
   if (!g_cfg) {
@@ -31,6 +55,8 @@ static void handleApiSettings(AsyncWebServerRequest *req) {
   doc["pintv"]  = g_cfg->pingIntervalSec;
   doc["intv"]   = g_cfg->updateIntervalSec;
   doc["wretry"] = g_cfg->wifiRetryDelaySec;
+  doc["rotation"] = g_cfg->displayRotation;
+  addSupportedDisplayRotations(doc);
   String json;
   serializeJson(doc, json);
   req->send(200, "application/json", json);
@@ -67,6 +93,8 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   long pingIntervalSec = doc["pintv"]  | static_cast<long>(next.pingIntervalSec);
   long updateIntervalSec = doc["intv"] | static_cast<long>(next.updateIntervalSec);
   long wifiRetryDelaySec = doc["wretry"] | static_cast<long>(next.wifiRetryDelaySec);
+  long displayRotation = doc["rotation"] |
+                         static_cast<long>(next.displayRotation);
   next.snmpPort        = (snmpPort >= 1 && snmpPort <= 65535)
                            ? static_cast<uint16_t>(snmpPort) : 0;
   next.ifIndex         = ifIndex > 0 ? static_cast<uint32_t>(ifIndex) : 0;
@@ -74,6 +102,10 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   next.pingIntervalSec = static_cast<uint32_t>(pingIntervalSec);
   next.updateIntervalSec = static_cast<uint32_t>(updateIntervalSec);
   next.wifiRetryDelaySec = static_cast<uint32_t>(wifiRetryDelaySec);
+  next.displayRotation =
+      (displayRotation >= 0 && displayRotation <= UINT16_MAX)
+          ? static_cast<uint16_t>(displayRotation)
+          : UINT16_MAX;
 
   normalizeSettings(next);
 
@@ -83,6 +115,7 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
     return;
   }
 
+  g_telemetrySettingsChanged = !telemetrySettingsEqual(*g_cfg, next);
   *g_cfg = next;
   g_saved = true;
   req->send(200, "text/plain", "Saved! Applying...");
@@ -177,6 +210,7 @@ void otaBegin(Settings &settings) {
   if (g_srv) return;
   g_cfg   = &settings;
   g_saved = false;
+  g_telemetrySettingsChanged = false;
 
   g_srv = new AsyncWebServer(80);
 
@@ -217,4 +251,8 @@ bool otaSettingsSaved() {
     return true;
   }
   return false;
+}
+
+bool otaTelemetrySettingsChanged() {
+  return g_telemetrySettingsChanged;
 }

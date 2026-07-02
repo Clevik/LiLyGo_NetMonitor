@@ -105,6 +105,8 @@ void setup() {
   delay(200);
   Serial.println("\n[NETMONITOR] boot");
 
+  bool haveConfig = SettingsStore::load(g_settings);
+
   if (!LittleFS.begin(true)) {
     Serial.println("[FS] LittleFS mount failed");
   }
@@ -112,17 +114,17 @@ void setup() {
   pinMode(PIN_KEY, INPUT_PULLUP);
 
 #if !defined(HW_AMOLED_143)
-  touchInit();
+  touchInit(g_settings.displayRotation);
 #endif
 
-  if (!uiInit()) {
+  if (!uiInit(g_settings.displayRotation)) {
     Serial.println("[UI] display init failed, halting");
     while (true) delay(1000);
   }
 
 #if defined(HW_AMOLED_143)
   delay(50);
-  if (!touchInit()) {
+  if (!touchInit(g_settings.displayRotation)) {
     Serial.println("[Touch] initialization failed");
   }
 #endif
@@ -130,7 +132,6 @@ void setup() {
   uiShowSplash();
   delay(1500);
 
-  bool haveConfig = SettingsStore::load(g_settings);
   enterState(haveConfig ? AppState::WifiConnect : AppState::ApConfig);
 }
 
@@ -142,6 +143,8 @@ void loop() {
       Serial.println("[FSM] KEY long press -> reset config");
       SettingsStore::clear();
       g_settings = Settings{};
+      uiSetRotation(g_settings.displayRotation);
+      touchSetRotation(g_settings.displayRotation);
       WiFi.disconnect(true, true);
       enterState(AppState::ApConfig);
       return;
@@ -154,6 +157,8 @@ void loop() {
       if (portalConfigSaved()) {
         Serial.println("[Portal] config saved, connecting...");
         SettingsStore::save(g_settings);
+        uiSetRotation(g_settings.displayRotation);
+        touchSetRotation(g_settings.displayRotation);
         enterState(AppState::WifiConnect);
       }
       break;
@@ -207,18 +212,23 @@ void loop() {
 
     case AppState::Running: {
       if (otaSettingsSaved()) {
-        Serial.println("[OTA] settings saved, restarting telemetry...");
+        Serial.println("[OTA] settings saved");
         SettingsStore::save(g_settings);
-        if (telemetryStop()) {
-          if (!telemetryStart(g_settings)) {
-            Serial.println("[OTA] telemetry restart skipped");
+        uiSetRotation(g_settings.displayRotation);
+        touchSetRotation(g_settings.displayRotation);
+        if (otaTelemetrySettingsChanged()) {
+          Serial.println("[OTA] telemetry settings changed, restarting telemetry...");
+          if (telemetryStop()) {
+            if (!telemetryStart(g_settings)) {
+              Serial.println("[OTA] telemetry restart skipped");
+            }
+            uiSetRouterIp(g_settings.routerHost.c_str());
+            g_lastTelemetryMs = 0;
+          } else {
+            Serial.println("[OTA] telemetry restart skipped: old task is still stopping");
           }
-          uiSetRouterIp(g_settings.routerHost.c_str());
-          g_lastUiMs = 0;
-          g_lastTelemetryMs = 0;
-        } else {
-          Serial.println("[OTA] telemetry restart skipped: old task is still stopping");
         }
+        g_lastUiMs = 0;
       }
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[WiFi] lost -> reconnect");

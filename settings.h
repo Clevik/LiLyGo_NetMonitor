@@ -7,12 +7,31 @@
 #include <Arduino.h>
 
 // Версия схемы конфигурации (для будущих миграций).
-constexpr uint16_t CONFIG_SCHEMA_VERSION = 3;
+constexpr uint16_t CONFIG_SCHEMA_VERSION = 4;
 constexpr uint32_t SETTINGS_INTERVAL_MIN_SEC = 1;
 constexpr uint32_t SETTINGS_INTERVAL_MAX_SEC = 3600;
 constexpr uint32_t SETTINGS_WIFI_RETRY_MIN_SEC = 1;
 constexpr uint32_t SETTINGS_WIFI_RETRY_MAX_SEC = 3600;
 constexpr uint32_t DEFAULT_RCI_INTERVAL_SEC = 15;
+constexpr uint16_t DEFAULT_DISPLAY_ROTATION = 0;
+
+#if defined(HW_AMOLED_143)
+constexpr uint16_t SUPPORTED_DISPLAY_ROTATIONS[] = {0, 90, 180, 270};
+#else
+constexpr uint16_t SUPPORTED_DISPLAY_ROTATIONS[] = {0, 180};
+#endif
+constexpr size_t SUPPORTED_DISPLAY_ROTATION_COUNT =
+    sizeof(SUPPORTED_DISPLAY_ROTATIONS) /
+    sizeof(SUPPORTED_DISPLAY_ROTATIONS[0]);
+
+inline bool isDisplayRotationSupported(uint16_t rotation) {
+  for (size_t i = 0; i < SUPPORTED_DISPLAY_ROTATION_COUNT; ++i) {
+    if (SUPPORTED_DISPLAY_ROTATIONS[i] == rotation) {
+      return true;
+    }
+  }
+  return false;
+}
 
 inline uint32_t clampSettingsIntervalSec(long value) {
   if (value < static_cast<long>(SETTINGS_INTERVAL_MIN_SEC)) {
@@ -54,6 +73,9 @@ struct Settings {
 
   // --- Обновление / история ---
   uint32_t    updateIntervalSec = 5;   // период опроса SNMP, сек
+
+  // --- Дисплей ---
+  uint16_t    displayRotation = DEFAULT_DISPLAY_ROTATION;  // градусы
 
   // Признак валидной сохранённой конфигурации.
   bool        configured     = false;

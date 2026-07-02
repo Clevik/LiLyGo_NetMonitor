@@ -70,6 +70,12 @@ small{color:#666;font-size:12px}
 <small>Wait time between Wi-Fi reconnection attempts when the network is unavailable.</small>
 </div>
 
+<div class='card'>
+<label>Display Rotation</label>
+<select id='rotation'><option value='0'>0°</option></select>
+<small>The new rotation is applied immediately without restarting the device.</small>
+</div>
+
 <div id='status'></div>
 <button class='btn' onclick='doSave()'>Save &amp; Connect</button>
 <a class='btn' href='/ota' style='margin-top:8px;background:#555;color:#fff'>Firmware Update (OTA)</a>
@@ -91,6 +97,13 @@ function scan(){
   }).catch(()=>{document.getElementById('wifiList').innerHTML='Scan failed';});
 }
 function pick(s){document.getElementById('ssid').value=s;}
+function setRotationOptions(d){
+  var values=Array.isArray(d.supportedRotations)?d.supportedRotations:[0];
+  var select=document.getElementById('rotation');
+  select.innerHTML=values.map(v=>'<option value="'+v+'">'+v+'°</option>').join('');
+  select.value=String(d.rotation||0);
+}
+fetch('/api/settings').then(r=>r.json()).then(setRotationOptions).catch(()=>{});
 function validInterval(v){return v>=1&&v<=3600&&Math.floor(v)===v;}
 function validPort(v){return v>=1&&v<=65535&&Math.floor(v)===v;}
 function doSave(){
@@ -100,6 +113,7 @@ function doSave(){
   var intv=+document.getElementById('intv').value;
   var rciintv=+document.getElementById('rciintv').value;
   var wretry=+document.getElementById('wretry').value;
+  var rotation=+document.getElementById('rotation').value;
   if(!ifidx||ifidx<1||Math.floor(ifidx)!==ifidx){alert('Enter Interface Index greater than 0');return;}
   if(!validPort(sport)){alert('SNMP Port must be 1..65535');return;}
   if(!validInterval(pintv)||!validInterval(intv)){alert('Ping and SNMP intervals must be 1..3600 sec');return;}
@@ -119,7 +133,8 @@ function doSave(){
     ping:document.getElementById('ping').value,
     pintv:pintv,
     intv:intv,
-    wretry:wretry
+    wretry:wretry,
+    rotation:rotation
   };
   if(!d.ssid){alert('Enter SSID');return;}
   if(!d.router.trim()){alert('Enter Router IP');return;}

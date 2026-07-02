@@ -136,6 +136,9 @@ void normalizeSettings(Settings &settings) {
 }
 
 bool validateSettings(const Settings &settings, String *error) {
+  if (!isDisplayRotationSupported(settings.displayRotation)) {
+    return reject(error, "Display Rotation is not supported");
+  }
   if (!hasText(settings.wifiSsid)) {
     return reject(error, "SSID is empty");
   }
@@ -222,10 +225,18 @@ bool load(Settings &out) {
   out.pingHost       = prefs.getString("ping", "8.8.8.8");
   out.pingIntervalSec = prefs.getULong("pintv", 5);
   out.updateIntervalSec = prefs.getULong("intv", 5);
+  out.displayRotation = prefs.getUShort(
+      "drot", DEFAULT_DISPLAY_ROTATION);
 
   prefs.end();
 
   out.configured     = true;
+  if (!isDisplayRotationSupported(out.displayRotation)) {
+    Serial.printf("[Settings] unsupported display rotation %u, using %u\n",
+                  static_cast<unsigned>(out.displayRotation),
+                  static_cast<unsigned>(DEFAULT_DISPLAY_ROTATION));
+    out.displayRotation = DEFAULT_DISPLAY_ROTATION;
+  }
   normalizeSettings(out);
 
   String error;
@@ -270,6 +281,7 @@ bool save(const Settings &in) {
   prefs.putString("ping",  stored.pingHost);
   prefs.putULong("pintv",  stored.pingIntervalSec);
   prefs.putULong("intv",   stored.updateIntervalSec);
+  prefs.putUShort("drot",  stored.displayRotation);
 
   prefs.end();
   return true;

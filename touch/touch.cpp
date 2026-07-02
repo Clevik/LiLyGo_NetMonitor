@@ -4,6 +4,12 @@
 #include "config.h"
 #include "touch.h"
 
+static uint16_t g_displayRotation = 0;
+
+void touchSetRotation(uint16_t displayRotation) {
+  g_displayRotation = displayRotation;
+}
+
 #if defined(HW_TOUCH_CST816T)
 
 static volatile bool g_irqFlag  = false;
@@ -26,7 +32,8 @@ static void IRAM_ATTR onTouchIrq() {
   g_irqFlag = true;
 }
 
-bool touchInit() {
+bool touchInit(uint16_t displayRotation) {
+  touchSetRotation(displayRotation);
   Wire.begin(TOUCH_SDA, TOUCH_SCL);
   pinMode(TOUCH_IRQ, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(TOUCH_IRQ), onTouchIrq, FALLING);
@@ -87,7 +94,8 @@ static void IRAM_ATTR onTouchInterrupt() {
   g_irqFlag = true;
 }
 
-bool touchInit() {
+bool touchInit(uint16_t displayRotation) {
+  touchSetRotation(displayRotation);
   g_touchReady = false;
   g_irqFlag = false;
 
@@ -123,17 +131,37 @@ bool touchReadTap(int16_t &x, int16_t &y) {
   if (g_lastTapMs != 0 && now - g_lastTapMs < TOUCH_DEBOUNCE_MS) return false;
   g_lastTapMs = now;
 
-  x = constrain(rawX, static_cast<int16_t>(0),
-                static_cast<int16_t>(SCREEN_W - 1));
-  y = constrain(rawY, static_cast<int16_t>(0),
-                static_cast<int16_t>(SCREEN_H - 1));
+  rawX = constrain(rawX, static_cast<int16_t>(0),
+                   static_cast<int16_t>(SCREEN_W - 1));
+  rawY = constrain(rawY, static_cast<int16_t>(0),
+                   static_cast<int16_t>(SCREEN_H - 1));
+
+  switch (g_displayRotation) {
+    case 90:
+      x = rawY;
+      y = SCREEN_H - 1 - rawX;
+      break;
+    case 180:
+      x = SCREEN_W - 1 - rawX;
+      y = SCREEN_H - 1 - rawY;
+      break;
+    case 270:
+      x = SCREEN_W - 1 - rawY;
+      y = rawX;
+      break;
+    default:
+      x = rawX;
+      y = rawY;
+      break;
+  }
   Serial.printf("[Touch] tap x=%d y=%d\n", x, y);
   return true;
 }
 
 #else
 
-bool touchInit() {
+bool touchInit(uint16_t displayRotation) {
+  touchSetRotation(displayRotation);
   Serial.println("[Touch] unsupported on this board");
   return false;
 }

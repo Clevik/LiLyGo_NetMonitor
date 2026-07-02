@@ -38,7 +38,8 @@ struct Telemetry {
   bool     dataValid      = false;
 };
 
-bool uiInit();
+bool uiInit(uint16_t displayRotation);
+bool uiSetRotation(uint16_t displayRotation);
 void uiShowSplash();
 void uiShowApConfig(const char *apName, const char *apIp);
 void uiShowConnecting(const char *ssid);

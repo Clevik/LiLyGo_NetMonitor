@@ -5,3 +5,4 @@
 void otaBegin(Settings &settings);
 void otaEnd();
 bool otaSettingsSaved();
+bool otaTelemetrySettingsChanged();
