@@ -496,14 +496,6 @@ void otaUpdateAddStatus(JsonDocument &doc) {
   doc["runningApp"] = otaRunningAppIndex();
 }
 
-OtaUpdateState otaUpdateState() {
-  return g_session.state;
-}
-
-const String &otaUpdateLastError() {
-  return g_session.error;
-}
-
 bool otaUpdateBusy() {
   return g_session.state != OtaUpdateState::Idle;
 }

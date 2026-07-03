@@ -28,8 +28,6 @@ bool otaUpdateManualRollback(String &error);
 void otaUpdateLoop();
 
 void otaUpdateAddStatus(JsonDocument &doc);
-OtaUpdateState otaUpdateState();
-const String &otaUpdateLastError();
 bool otaUpdateBusy();
 
 bool otaUpdateTelemetryPauseRequested();
