@@ -6,6 +6,7 @@
 body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#eee;padding:16px}
 h1{color:#07ff;text-align:center;margin:12px 0}
 .card{background:#16213e;border-radius:10px;padding:16px;margin:12px 0}
+.card h2{color:#07ff;font-size:18px;margin-bottom:12px}
 label{display:block;margin:8px 0 4px;font-size:14px;color:#aaa}
 input,select{width:100%;padding:10px;border:1px solid #333;border-radius:6px;
   background:#0f3460;color:#fff;font-size:16px}
@@ -28,6 +29,7 @@ small{color:#666;font-size:12px}
 </style></head><body>
 <h1>NETMONITOR</h1>
 <div class='card'>
+<h2>Config</h2>
 <label>Router IP</label>
 <input id='router'>
 <label>SNMP Port</label>
@@ -47,11 +49,9 @@ small{color:#666;font-size:12px}
 <label>Router API Interface</label>
 <input id='apiinterface' required maxlength='63' pattern='[A-Za-z0-9._-]{1,63}' value='UsbLte0'>
 <small>Interface used by /rci/show/interface/&lt;interface&gt;.</small>
-<label>Router API Poll Interval (sec)</label>
-<input id='rciintv' type='number' min='1' max='3600' step='1' value='15'>
-<small>How often to request WAN state and uptime from the router API.</small>
 </div>
 <div class='card'>
+<h2>Time Intervals</h2>
 <label>Ping Host</label>
 <input id='ping'>
 <label>External Ping Interval (sec)</label>
@@ -60,11 +60,15 @@ small{color:#666;font-size:12px}
 <label>SNMP Poll Interval (sec)</label>
 <input id='intv' type='number' min='1' max='3600' step='1' value='5'>
 <small>How often to poll router SNMP status and traffic counters.</small>
+<label>Router API Poll Interval (sec)</label>
+<input id='rciintv' type='number' min='1' max='3600' step='1' value='15'>
+<small>How often to request WAN state and uptime from the router API.</small>
 <label>Wi-Fi Retry Delay (sec)</label>
 <input id='wretry' type='number' min='1' max='3600' step='1' value='20'>
 <small>Wait time between Wi-Fi reconnection attempts when the network is unavailable.</small>
 </div>
 <div class='card'>
+<h2>UI</h2>
 <label>Display Rotation</label>
 <select id='rotation'><option value='0'>0°</option></select>
 <small>The new rotation is applied immediately without restarting the device.</small>
