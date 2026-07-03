@@ -152,8 +152,6 @@ static void netTask(void *arg) {
         t.linkUp = snmp.linkUp;
         t.systemUptimeSec = snmp.systemUptimeSec;
         t.systemUptimeValid = snmp.systemUptimeValid;
-        t.interfaceUptimeSec = snmp.interfaceStateUptimeSec;
-        t.interfaceUptimeValid = snmp.interfaceStateUptimeValid;
         t.interfaceAliasValid = snmp.interfaceAliasValid;
         if (snmp.interfaceAliasValid) {
           strncpy(t.interfaceAlias, snmp.interfaceAlias, sizeof(t.interfaceAlias) - 1);
@@ -227,8 +225,6 @@ static void netTask(void *arg) {
         g_snmpFailCount++;
         t.systemUptimeSec = 0;
         t.systemUptimeValid = false;
-        t.interfaceUptimeSec = 0;
-        t.interfaceUptimeValid = false;
       }
       changed = true;
     }
@@ -310,8 +306,6 @@ static void netTask(void *arg) {
       t.linkUncertain = true;
     }
     if (!t.linkUp) {
-      t.interfaceUptimeSec = 0;
-      t.interfaceUptimeValid = false;
       t.wanUptimeSec = 0;
       t.wanUptimeValid = false;
     }

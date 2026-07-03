@@ -31,8 +31,6 @@ struct Telemetry {
   bool     wanUptimeValid = false;
   WanConnectionState wanConnectionState = WanConnectionState::Unknown;
   bool     wanConnectionStateValid = false;
-  uint32_t interfaceUptimeSec = 0;
-  bool     interfaceUptimeValid = false;
   char     interfaceAlias[32] = {};
   bool     interfaceAliasValid = false;
   uint32_t lastUpdateMs   = 0;
