@@ -219,7 +219,7 @@ bool validateSettings(const Settings &settings, String *error) {
   if (!isValidRouterApiInterface(settings.routerApiInterface)) {
     return reject(
         error,
-        "Keenetic API Interface must be 1..63 path-safe characters");
+        "Router API Interface must be 1..63 path-safe characters");
   }
   if (!hasText(settings.pingHost)) {
     return reject(error, "Ping Host is empty");
@@ -237,7 +237,7 @@ bool validateSettings(const Settings &settings, String *error) {
   }
   if (settings.rciIntervalSec < SETTINGS_INTERVAL_MIN_SEC ||
       settings.rciIntervalSec > SETTINGS_INTERVAL_MAX_SEC) {
-    return reject(error, "RCI Poll Interval must be 1..3600 sec");
+    return reject(error, "Router API Poll Interval must be 1..3600 sec");
   }
   if (settings.wifiRetryDelaySec < SETTINGS_WIFI_RETRY_MIN_SEC ||
       settings.wifiRetryDelaySec > SETTINGS_WIFI_RETRY_MAX_SEC) {
