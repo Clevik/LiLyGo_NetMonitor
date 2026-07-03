@@ -12,7 +12,6 @@ static SNMPManager  *g_mgr  = nullptr;
 static SNMPGet      *g_req  = nullptr;
 
 static IPAddress     g_ip;
-static uint16_t      g_port = 161;
 
 static int           g_operStatus;
 static uint32_t      g_inOctets;
@@ -55,7 +54,6 @@ void snmpInit(IPAddress ip, uint16_t port, const char *community,
   }
 
   g_ip   = ip;
-  g_port = port;
 
   snprintf(g_oidOper, sizeof(g_oidOper),
            ".1.3.6.1.2.1.2.2.1.8.%u", ifIndex);
@@ -155,7 +153,6 @@ static bool pollOnce(ValueCallback *cbIn, ValueCallback *cbOut,
 }
 
 static void fillOutput(SnmpData &out, bool hc) {
-  out.valid  = true;
   out.linkUp = (g_operStatus == 1);
   out.isHC   = hc;
   out.systemUptimeValid = false;

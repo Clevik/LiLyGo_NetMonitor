@@ -292,7 +292,6 @@ static void netTask(void *arg) {
     }
 
     t.dataValid    = true;
-    t.lastUpdateMs = millis();
     t.linkUncertain = false;
 
     if (t.wanConnectionStateValid) {

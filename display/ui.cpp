@@ -573,13 +573,8 @@ constexpr int16_t STATUS_CENTER_X_OFFSET = 3;
 
 constexpr int16_t GLOBE_RADIUS = 80;
 constexpr int16_t GLOBE_CENTER_Y = 211;
-// Низ зоны анимации — y=291; верх зон скорости расположен на 6 px ниже.
-constexpr int16_t SPEED_ZONE_Y = 297;
-// textSize 4 занимает 32 px; ещё по 1 px нужны сверху и снизу для glow.
-constexpr int16_t SPEED_ZONE_H = 34;
 constexpr int16_t SPEED_ZONE_CENTER_Y = 314;
 constexpr int16_t SPEED_UNIT_CENTER_Y = 322;
-constexpr int16_t SPEED_ZONE_W = 174;
 constexpr int16_t SPEED_IN_ZONE_X = 54;
 constexpr int16_t SPEED_OUT_ZONE_X = 238;
 constexpr int16_t PING_VALUE_PDF_Y = 210;
@@ -593,9 +588,7 @@ constexpr int16_t PING_ZONE_RIGHT_X = CENTER_X + GLOBE_RADIUS + 1;
 constexpr int16_t PING_LEFT_CENTER_X = PING_ZONE_LEFT_X + PING_ZONE_W / 2;
 constexpr int16_t PING_RIGHT_CENTER_X = PING_ZONE_RIGHT_X + PING_ZONE_W / 2;
 constexpr int16_t PING_ZONE_Y = 155;
-constexpr int16_t PING_ZONE_H = 116;
 constexpr int16_t PING_ICON_TOP_Y = PING_ZONE_Y + 7;
-constexpr int16_t PING_ICON_RADIUS = 22;
 constexpr uint8_t PING_STATS_TEXT_SIZE = ROUTER_TITLE_TEXT_SIZE;
 constexpr int16_t PING_STATS_CENTER_Y = 262;
 
@@ -616,8 +609,6 @@ constexpr int16_t SPEED_VALUE_UNIT_GAP = 4;
 constexpr int16_t CENTER_DIVIDER_TOP_Y = 297;
 constexpr int16_t CENTER_DIVIDER_BOTTOM_Y = 431;
 
-constexpr int16_t DEVICE_IP_ZONE_Y = 436;
-constexpr int16_t DEVICE_IP_ZONE_H = 16;
 constexpr int16_t DEVICE_IP_CENTER_Y = 444;
 
 constexpr uint16_t GLOBE_FRAME_MS = UI_ROUND_FRAME_MS;

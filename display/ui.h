@@ -33,7 +33,6 @@ struct Telemetry {
   bool     wanConnectionStateValid = false;
   char     interfaceAlias[32] = {};
   bool     interfaceAliasValid = false;
-  uint32_t lastUpdateMs   = 0;
   bool     dataValid      = false;
 };
 

@@ -9,7 +9,6 @@ struct SnmpData {
   uint64_t outOctets                 = 0;
   uint32_t systemUptimeSec           = 0;
   char     interfaceAlias[32]        = {};
-  bool     valid                     = false;
   bool     isHC                      = false;
   bool     countersValid             = false;
   bool     systemUptimeValid         = false;
