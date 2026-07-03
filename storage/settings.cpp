@@ -23,6 +23,19 @@ static bool isAlphaNumChar(char c) {
          (c >= 'a' && c <= 'z');
 }
 
+static bool isValidRouterApiInterface(const String &value) {
+  if (value.length() == 0 || value.length() > 63) {
+    return false;
+  }
+  for (size_t i = 0; i < value.length(); ++i) {
+    char c = value.charAt(i);
+    if (!isAlphaNumChar(c) && c != '.' && c != '_' && c != '-') {
+      return false;
+    }
+  }
+  return true;
+}
+
 static bool isStrictIPv4Address(const String &value) {
   if (value.length() == 0) {
     return false;
@@ -170,6 +183,7 @@ void normalizeSettings(Settings &settings) {
   settings.pingHost.trim();
   settings.ifName.trim();
   settings.routerApiLogin.trim();
+  settings.routerApiInterface.trim();
   settings.powerSave.timeZone.trim();
 }
 
@@ -201,6 +215,11 @@ bool validateSettings(const Settings &settings, String *error) {
   }
   if (settings.ifIndex == 0) {
     return reject(error, "Interface Index must be greater than 0");
+  }
+  if (!isValidRouterApiInterface(settings.routerApiInterface)) {
+    return reject(
+        error,
+        "Keenetic API Interface must be 1..63 path-safe characters");
   }
   if (!hasText(settings.pingHost)) {
     return reject(error, "Ping Host is empty");
@@ -336,6 +355,8 @@ bool load(Settings &out) {
   out.ifName         = prefs.getString("ifnam", "");
   out.routerApiLogin = prefs.getString("apilogin", "");
   out.routerApiPassword = prefs.getString("apipass", "");
+  out.routerApiInterface = prefs.getString(
+      "apiif", DEFAULT_ROUTER_API_INTERFACE);
   out.rciIntervalSec = prefs.getULong("rciintv", DEFAULT_RCI_INTERVAL_SEC);
   out.pingHost       = prefs.getString("ping", "8.8.8.8");
   out.pingIntervalSec = prefs.getULong("pintv", 5);
@@ -401,6 +422,7 @@ bool save(const Settings &in) {
   prefs.putString("ifnam", stored.ifName);
   prefs.putString("apilogin", stored.routerApiLogin);
   prefs.putString("apipass", stored.routerApiPassword);
+  prefs.putString("apiif", stored.routerApiInterface);
   prefs.putULong("rciintv", stored.rciIntervalSec);
   prefs.putString("ping",  stored.pingHost);
   prefs.putULong("pintv",  stored.pingIntervalSec);

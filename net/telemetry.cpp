@@ -47,6 +47,7 @@ static int       g_snmpVersion   = 1;
 static uint32_t  g_ifIndex       = 0;
 static char      g_routerApiLogin[64];
 static char      g_routerApiPassword[64];
+static char      g_routerApiInterface[64] = {};
 static bool      g_routerApiConfigured = false;
 
 static TaskHandle_t currentTaskHandle() {
@@ -240,7 +241,8 @@ static void netTask(void *arg) {
       lastRciMs = now;
       KeeneticRciData rci;
       if (keeneticRciFetchWanData(g_routerIP, g_routerApiLogin,
-                                  g_routerApiPassword, rci)) {
+                                  g_routerApiPassword,
+                                  g_routerApiInterface, rci)) {
         t.wanConnectionState =
             parseWanConnectionState(rci.wanConnectionState);
         t.wanConnectionStateValid = rci.wanConnectionStateValid;
@@ -374,8 +376,12 @@ bool telemetryStart(const Settings &settings) {
   strncpy(g_routerApiPassword, settings.routerApiPassword.c_str(),
           sizeof(g_routerApiPassword) - 1);
   g_routerApiPassword[sizeof(g_routerApiPassword) - 1] = '\0';
+  strncpy(g_routerApiInterface, settings.routerApiInterface.c_str(),
+          sizeof(g_routerApiInterface) - 1);
+  g_routerApiInterface[sizeof(g_routerApiInterface) - 1] = '\0';
   g_routerApiConfigured = (g_routerApiLogin[0] != '\0' &&
-                           g_routerApiPassword[0] != '\0');
+                           g_routerApiPassword[0] != '\0' &&
+                           g_routerApiInterface[0] != '\0');
   keeneticRciResetSession();
 
   g_snmpReady      = false;

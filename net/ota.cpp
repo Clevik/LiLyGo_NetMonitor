@@ -27,6 +27,7 @@ static bool telemetrySettingsEqual(const Settings &left,
          left.ifName == right.ifName &&
          left.routerApiLogin == right.routerApiLogin &&
          left.routerApiPassword == right.routerApiPassword &&
+         left.routerApiInterface == right.routerApiInterface &&
          left.rciIntervalSec == right.rciIntervalSec &&
          left.pingHost == right.pingHost &&
          left.pingIntervalSec == right.pingIntervalSec &&
@@ -167,6 +168,7 @@ static void handleApiSettings(AsyncWebServerRequest *req) {
   doc["ifidx"]  = g_cfg->ifIndex;
   doc["apilogin"] = g_cfg->routerApiLogin;
   doc["apipass"]  = g_cfg->routerApiPassword;
+  doc["apiinterface"] = g_cfg->routerApiInterface;
   doc["rciintv"] = g_cfg->rciIntervalSec;
   doc["ping"]   = g_cfg->pingHost;
   doc["pintv"]  = g_cfg->pingIntervalSec;
@@ -212,6 +214,8 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   long ifIndex         = doc["ifidx"]  | static_cast<long>(next.ifIndex);
   next.routerApiLogin  = doc["apilogin"] | next.routerApiLogin;
   next.routerApiPassword = doc["apipass"] | next.routerApiPassword;
+  next.routerApiInterface =
+      doc["apiinterface"] | next.routerApiInterface;
   long rciIntervalSec = doc["rciintv"] | static_cast<long>(next.rciIntervalSec);
   next.pingHost        = doc["ping"]   | next.pingHost;
   long pingIntervalSec = doc["pintv"]  | static_cast<long>(next.pingIntervalSec);

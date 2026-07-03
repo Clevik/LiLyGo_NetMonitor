@@ -56,6 +56,9 @@ small{color:#666;font-size:12px}
 <label>Keenetic API Password</label>
 <input id='apipass' type='password' autocomplete='current-password' placeholder='Optional'>
 <small>Optional. Enables WAN connection uptime via Keenetic RCI/API.</small>
+<label>Keenetic API Interface</label>
+<input id='apiinterface' required maxlength='63' pattern='[A-Za-z0-9._-]{1,63}' value='UsbLte0'>
+<small>Interface used by /rci/show/interface/&lt;interface&gt;.</small>
 <label>RCI Poll Interval (sec)</label>
 <input id='rciintv' type='number' min='1' max='3600' step='1' value='15'>
 <small>How often to request WAN state and uptime from Keenetic RCI.</small>
@@ -211,6 +214,7 @@ function loadTimeZones(){
   }).catch(()=>{});
 }
 fetch('/api/settings').then(r=>r.json()).then(d=>{
+  document.getElementById('apiinterface').value=d.apiinterface||'UsbLte0';
   setRotationOptions(d);
   setColorSchemeOptions(d);
   setPowerSafe(d);
@@ -230,8 +234,10 @@ function doSave(){
   var nightStartMinute=timeToMinute(document.getElementById('nightStart').value);
   var nightEndMinute=timeToMinute(document.getElementById('nightEnd').value);
   var timeZone=document.getElementById('timeZone').value.trim();
+  var apiinterface=document.getElementById('apiinterface').value.trim();
   if(!ifidx||ifidx<1||Math.floor(ifidx)!==ifidx){alert('Enter Interface Index greater than 0');return;}
   if(!validPort(sport)){alert('SNMP Port must be 1..65535');return;}
+  if(!/^[A-Za-z0-9._-]{1,63}$/.test(apiinterface)){alert('Keenetic API Interface must be 1..63 path-safe characters');return;}
   if(!validInterval(pintv)||!validInterval(intv)){alert('Ping and SNMP intervals must be 1..3600 sec');return;}
   if(!validInterval(rciintv)){alert('RCI Poll Interval must be 1..3600 sec');return;}
   if(!validInterval(wretry)){alert('Wi-Fi Retry Delay must be 1..3600 sec');return;}
@@ -248,6 +254,7 @@ function doSave(){
     ifidx:ifidx,
     apilogin:document.getElementById('apilogin').value,
     apipass:document.getElementById('apipass').value,
+    apiinterface:apiinterface,
     rciintv:rciintv,
     ping:document.getElementById('ping').value,
     pintv:pintv,

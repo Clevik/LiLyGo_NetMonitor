@@ -13,5 +13,6 @@ struct KeeneticRciData {
 bool keeneticRciFetchWanData(IPAddress routerIp,
                              const char *login,
                              const char *password,
+                             const char *interfaceName,
                              KeeneticRciData &out);
 void keeneticRciResetSession();

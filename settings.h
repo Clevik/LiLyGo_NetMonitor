@@ -8,13 +8,14 @@
 #include "display/power_policy.h"
 
 // Версия схемы конфигурации (для будущих миграций).
-constexpr uint16_t CONFIG_SCHEMA_VERSION = 5;
+constexpr uint16_t CONFIG_SCHEMA_VERSION = 6;
 constexpr uint8_t POWER_SETTINGS_SCHEMA_VERSION = 1;
 constexpr uint32_t SETTINGS_INTERVAL_MIN_SEC = 1;
 constexpr uint32_t SETTINGS_INTERVAL_MAX_SEC = 3600;
 constexpr uint32_t SETTINGS_WIFI_RETRY_MIN_SEC = 1;
 constexpr uint32_t SETTINGS_WIFI_RETRY_MAX_SEC = 3600;
 constexpr uint32_t DEFAULT_RCI_INTERVAL_SEC = 15;
+constexpr char DEFAULT_ROUTER_API_INTERFACE[] = "UsbLte0";
 constexpr uint16_t DEFAULT_DISPLAY_ROTATION = 0;
 
 #if defined(HW_AMOLED_143)
@@ -96,6 +97,7 @@ struct Settings {
   String      ifName;              // имя интерфейса (опционально)
   String      routerApiLogin;      // логин Keenetic RCI/API для WAN uptime
   String      routerApiPassword;   // пароль Keenetic RCI/API для WAN uptime
+  String      routerApiInterface = DEFAULT_ROUTER_API_INTERFACE;
   uint32_t    rciIntervalSec = DEFAULT_RCI_INTERVAL_SEC;
 
   // --- Пинг ---

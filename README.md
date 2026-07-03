@@ -28,7 +28,8 @@ with a captive portal. Connect from your phone or laptop and configure:
 
 - Wi-Fi network (SSID & password, with scan)
 - Router IP and SNMP parameters (port, version v1/v2c, community string, interface index)
-- Optional Keenetic API login/password for WAN connection uptime
+- Optional Keenetic API login/password and the RCI interface name for WAN
+  connection uptime
 - Ping host and interval
 
 After saving, the device connects to your Wi-Fi and enters monitoring mode.
@@ -95,6 +96,7 @@ the application and its selected filesystem are rolled back.
 | SNMP Version | v2c | SNMP protocol version |
 | SNMP Community | `public` | Community string |
 | SNMP Port | 161 | Router SNMP port |
+| Keenetic API Interface | `UsbLte0` | Interface requested through Keenetic RCI |
 | RCI Poll Interval | 15 sec | How often to request Keenetic WAN state and uptime |
 | Wi-Fi Retry Delay | 20 sec | Wait between Wi-Fi reconnection attempts |
 | Startup Brightness | 100% | Normal brightness after boot |
@@ -130,7 +132,8 @@ the application and its selected filesystem are rolled back.
 
 - Сеть Wi-Fi (SSID и пароль, со сканированием)
 - IP-адрес роутера и параметры SNMP (порт, версия v1/v2c, community-строка, индекс интерфейса)
-- Опциональные логин/пароль Keenetic API для UPTIME WAN-соединения
+- Опциональные логин/пароль Keenetic API и имя RCI-интерфейса для UPTIME
+  WAN-соединения
 - Хост и интервал пинга
 
 После сохранения устройство подключается к вашей Wi-Fi сети и переходит в
@@ -199,6 +202,7 @@ OTA-страница поддерживает обновление только 
 | Версия SNMP | v2c | Версия протокола SNMP |
 | Community SNMP | `public` | Community-строка |
 | Порт SNMP | 161 | Порт SNMP на роутере |
+| Интерфейс Keenetic API | `UsbLte0` | Интерфейс, запрашиваемый через Keenetic RCI |
 | Интервал RCI | 15 сек | Частота запроса состояния и UPTIME WAN Keenetic |
 | Задержка реконнекта Wi-Fi | 20 сек | Пауза между попытками переподключения к Wi-Fi |
 | Стартовая яркость | 100% | Обычная яркость после запуска |

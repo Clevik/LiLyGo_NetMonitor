@@ -307,18 +307,19 @@ static bool parseWanData(const String &body, KeeneticRciData &out) {
 bool keeneticRciFetchWanData(IPAddress routerIp,
                              const char *login,
                              const char *password,
+                             const char *interfaceName,
                              KeeneticRciData &out) {
   out = KeeneticRciData{};
-  if (!hasText(login) || !hasText(password)) {
+  if (!hasText(login) || !hasText(password) || !hasText(interfaceName)) {
     keeneticRciResetSession();
     return false;
   }
 
   String body;
-  static constexpr const char *WAN_INTERFACE_PATH =
-      "/rci/show/interface/UsbLte0";
+  String interfacePath = "/rci/show/interface/";
+  interfacePath += interfaceName;
   if (!fetchRciValueWithSession(routerIp, login, password,
-                                WAN_INTERFACE_PATH, body)) {
+                                interfacePath.c_str(), body)) {
     return false;
   }
   return parseWanData(body, out);
