@@ -94,10 +94,9 @@ struct Settings {
   SnmpVersion snmpVersion    = SnmpVersion::V2C;
   String      snmpCommunity  = "public";
   uint32_t    ifIndex        = 0;  // индекс WAN-интерфейса (IF-MIB), должен быть > 0
-  String      ifName;              // имя интерфейса (опционально)
   String      routerApiLogin;      // логин Keenetic RCI/API для WAN uptime
   String      routerApiPassword;   // пароль Keenetic RCI/API для WAN uptime
-  String      routerApiInterface = DEFAULT_ROUTER_API_INTERFACE;
+  String      ifName = DEFAULT_ROUTER_API_INTERFACE;  // имя интерфейса Router API
   uint32_t    rciIntervalSec = DEFAULT_RCI_INTERVAL_SEC;
 
   // --- Пинг ---

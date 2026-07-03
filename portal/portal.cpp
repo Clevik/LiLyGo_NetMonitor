@@ -153,7 +153,7 @@ static bool readPowerSettings(const JsonDocument &doc,
 static void handleApiSettings(AsyncWebServerRequest *req) {
   JsonDocument doc;
   doc["apiinterface"] = g_cfg
-      ? g_cfg->routerApiInterface
+      ? g_cfg->ifName
       : DEFAULT_ROUTER_API_INTERFACE;
   addDisplaySettings(doc);
   addPowerSettings(doc);
@@ -206,8 +206,7 @@ static void handleSave(AsyncWebServerRequest *req, uint8_t *data, size_t len) {
   long ifIndex           = doc["ifidx"]  | 0L;
   next.routerApiLogin    = doc["apilogin"] | "";
   next.routerApiPassword = doc["apipass"]  | "";
-  next.routerApiInterface =
-      doc["apiinterface"] | DEFAULT_ROUTER_API_INTERFACE;
+  next.ifName = doc["apiinterface"] | DEFAULT_ROUTER_API_INTERFACE;
   long rciIntervalSec    = doc["rciintv"] | static_cast<long>(DEFAULT_RCI_INTERVAL_SEC);
   next.pingHost          = doc["ping"]   | "8.8.8.8";
   long pingIntervalSec   = doc["pintv"]  | 5L;

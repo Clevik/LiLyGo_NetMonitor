@@ -23,7 +23,7 @@ static bool isAlphaNumChar(char c) {
          (c >= 'a' && c <= 'z');
 }
 
-static bool isValidRouterApiInterface(const String &value) {
+static bool isValidIfName(const String &value) {
   if (value.length() == 0 || value.length() > 63) {
     return false;
   }
@@ -181,9 +181,8 @@ void normalizeSettings(Settings &settings) {
   settings.routerHost.trim();
   settings.snmpCommunity.trim();
   settings.pingHost.trim();
-  settings.ifName.trim();
   settings.routerApiLogin.trim();
-  settings.routerApiInterface.trim();
+  settings.ifName.trim();
   settings.powerSave.timeZone.trim();
 }
 
@@ -216,7 +215,7 @@ bool validateSettings(const Settings &settings, String *error) {
   if (settings.ifIndex == 0) {
     return reject(error, "Interface Index must be greater than 0");
   }
-  if (!isValidRouterApiInterface(settings.routerApiInterface)) {
+  if (!isValidIfName(settings.ifName)) {
     return reject(
         error,
         "Router API Interface must be 1..63 path-safe characters");
@@ -352,10 +351,9 @@ bool load(Settings &out) {
   out.snmpVersion    = static_cast<SnmpVersion>(prefs.getUChar("sver", 1));
   out.snmpCommunity  = prefs.getString("scom", "public");
   out.ifIndex        = prefs.getULong("ifidx", 0);
-  out.ifName         = prefs.getString("ifnam", "");
   out.routerApiLogin = prefs.getString("apilogin", "");
   out.routerApiPassword = prefs.getString("apipass", "");
-  out.routerApiInterface = prefs.getString(
+  out.ifName = prefs.getString(
       "apiif", DEFAULT_ROUTER_API_INTERFACE);
   out.rciIntervalSec = prefs.getULong("rciintv", DEFAULT_RCI_INTERVAL_SEC);
   out.pingHost       = prefs.getString("ping", "8.8.8.8");
@@ -419,10 +417,9 @@ bool save(const Settings &in) {
   prefs.putUChar("sver",   static_cast<uint8_t>(stored.snmpVersion));
   prefs.putString("scom",  stored.snmpCommunity);
   prefs.putULong("ifidx",  stored.ifIndex);
-  prefs.putString("ifnam", stored.ifName);
   prefs.putString("apilogin", stored.routerApiLogin);
   prefs.putString("apipass", stored.routerApiPassword);
-  prefs.putString("apiif", stored.routerApiInterface);
+  prefs.putString("apiif", stored.ifName);
   prefs.putULong("rciintv", stored.rciIntervalSec);
   prefs.putString("ping",  stored.pingHost);
   prefs.putULong("pintv",  stored.pingIntervalSec);
