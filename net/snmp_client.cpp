@@ -12,25 +12,30 @@ static SNMPManager  *g_mgr  = nullptr;
 static SNMPGet      *g_req  = nullptr;
 
 static IPAddress     g_ip;
-static uint16_t      g_port = 161;
 
 static int           g_operStatus;
 static uint32_t      g_inOctets;
 static uint32_t      g_outOctets;
 static uint64_t      g_hcInOctets;
 static uint64_t      g_hcOutOctets;
+static uint32_t      g_sysUpTimeTicks;
+static char          g_ifAliasRaw[SNMP_OCTETSTRING_MAX_LENGTH];
+static char         *g_ifAliasValue = g_ifAliasRaw;
 
-static ValueCallback *g_cbOper  = nullptr;
-static ValueCallback *g_cbIn    = nullptr;
-static ValueCallback *g_cbOut   = nullptr;
-static ValueCallback *g_cbHcIn  = nullptr;
-static ValueCallback *g_cbHcOut = nullptr;
+static ValueCallback *g_cbOper         = nullptr;
+static ValueCallback *g_cbIn           = nullptr;
+static ValueCallback *g_cbOut          = nullptr;
+static ValueCallback *g_cbHcIn         = nullptr;
+static ValueCallback *g_cbHcOut        = nullptr;
+static ValueCallback *g_cbSysUpTime    = nullptr;
+static ValueCallback *g_cbIfAlias      = nullptr;
 
 static char g_oidOper[64];
 static char g_oidIn[64];
 static char g_oidOut[64];
 static char g_oidHcIn[64];
 static char g_oidHcOut[64];
+static char g_oidIfAlias[64];
 
 static int  g_counterMode = -1;
 static bool g_parseOk     = false;
@@ -39,6 +44,7 @@ static bool g_parseOk     = false;
 // перед опросом; если после ответа маркер остался — счётчик не пришёл.
 static constexpr uint64_t COUNTER64_SENTINEL = UINT64_MAX;
 static constexpr uint32_t COUNTER32_SENTINEL = UINT32_MAX;
+static constexpr uint32_t TIMETICKS_SENTINEL = UINT32_MAX;
 
 void snmpInit(IPAddress ip, uint16_t port, const char *community,
               int version, uint32_t ifIndex) {
@@ -48,7 +54,6 @@ void snmpInit(IPAddress ip, uint16_t port, const char *community,
   }
 
   g_ip   = ip;
-  g_port = port;
 
   snprintf(g_oidOper, sizeof(g_oidOper),
            ".1.3.6.1.2.1.2.2.1.8.%u", ifIndex);
@@ -60,17 +65,23 @@ void snmpInit(IPAddress ip, uint16_t port, const char *community,
            ".1.3.6.1.2.1.31.1.1.1.6.%u", ifIndex);
   snprintf(g_oidHcOut, sizeof(g_oidHcOut),
            ".1.3.6.1.2.1.31.1.1.1.10.%u", ifIndex);
+  snprintf(g_oidIfAlias, sizeof(g_oidIfAlias),
+           ".1.3.6.1.2.1.31.1.1.1.18.%u", ifIndex);
 
   g_mgr = new SNMPManager(community);
   g_mgr->callbacks->value = nullptr;
   g_mgr->_udp = nullptr;
   g_mgr->setUDP(&g_udp);
 
-  g_cbOper  = g_mgr->addIntegerHandler(ip, g_oidOper, &g_operStatus);
-  g_cbIn    = g_mgr->addCounter32Handler(ip, g_oidIn, &g_inOctets);
-  g_cbOut   = g_mgr->addCounter32Handler(ip, g_oidOut, &g_outOctets);
-  g_cbHcIn  = g_mgr->addCounter64Handler(ip, g_oidHcIn, &g_hcInOctets);
-  g_cbHcOut = g_mgr->addCounter64Handler(ip, g_oidHcOut, &g_hcOutOctets);
+  g_cbOper         = g_mgr->addIntegerHandler(ip, g_oidOper, &g_operStatus);
+  g_cbIn           = g_mgr->addCounter32Handler(ip, g_oidIn, &g_inOctets);
+  g_cbOut          = g_mgr->addCounter32Handler(ip, g_oidOut, &g_outOctets);
+  g_cbHcIn         = g_mgr->addCounter64Handler(ip, g_oidHcIn, &g_hcInOctets);
+  g_cbHcOut        = g_mgr->addCounter64Handler(ip, g_oidHcOut, &g_hcOutOctets);
+  g_cbSysUpTime    = g_mgr->addTimestampHandler(ip, ".1.3.6.1.2.1.1.3.0",
+                                                &g_sysUpTimeTicks);
+  g_cbIfAlias      = g_mgr->addStringHandler(ip, g_oidIfAlias,
+                                             &g_ifAliasValue);
 
   g_req = new SNMPGet(community, version);
   g_req->setPort(port);
@@ -80,6 +91,9 @@ void snmpInit(IPAddress ip, uint16_t port, const char *community,
   g_outOctets   = 0;
   g_hcInOctets  = 0;
   g_hcOutOctets = 0;
+  g_sysUpTimeTicks = 0;
+  g_ifAliasRaw[0] = '\0';
+  g_ifAliasValue = g_ifAliasRaw;
   g_counterMode = -1;
 
   Serial.printf("[SNMP] init %s v%d ifIndex=%u port=%u\n",
@@ -89,21 +103,28 @@ void snmpInit(IPAddress ip, uint16_t port, const char *community,
 void snmpCleanup() {
   if (g_req) { delete g_req; g_req = nullptr; }
   if (g_mgr) { delete g_mgr; g_mgr = nullptr; }
-  g_cbOper  = nullptr;
-  g_cbIn    = nullptr;
-  g_cbOut   = nullptr;
-  g_cbHcIn  = nullptr;
-  g_cbHcOut = nullptr;
+  g_cbOper         = nullptr;
+  g_cbIn           = nullptr;
+  g_cbOut          = nullptr;
+  g_cbHcIn         = nullptr;
+  g_cbHcOut        = nullptr;
+  g_cbSysUpTime    = nullptr;
+  g_cbIfAlias      = nullptr;
 }
 
 static bool pollOnce(ValueCallback *cbIn, ValueCallback *cbOut,
                      uint32_t timeoutMs) {
   g_operStatus = 0;
+  g_sysUpTimeTicks = TIMETICKS_SENTINEL;
+  memset(g_ifAliasRaw, 0, sizeof(g_ifAliasRaw));
+  g_ifAliasValue = g_ifAliasRaw;
   g_parseOk    = false;
 
   g_req->addOIDPointer(g_cbOper);
   g_req->addOIDPointer(cbIn);
   g_req->addOIDPointer(cbOut);
+  g_req->addOIDPointer(g_cbSysUpTime);
+  g_req->addOIDPointer(g_cbIfAlias);
   g_req->setIP(WiFi.localIP());
   g_req->setUDP(&g_udp);
   g_req->setRequestID(rand() % 5555);
@@ -132,9 +153,12 @@ static bool pollOnce(ValueCallback *cbIn, ValueCallback *cbOut,
 }
 
 static void fillOutput(SnmpData &out, bool hc) {
-  out.valid  = true;
   out.linkUp = (g_operStatus == 1);
   out.isHC   = hc;
+  out.systemUptimeValid = false;
+  out.systemUptimeSec = 0;
+  out.interfaceAliasValid = false;
+  out.interfaceAlias[0] = '\0';
   if (hc) {
     out.countersValid = (g_hcInOctets  != COUNTER64_SENTINEL &&
                          g_hcOutOctets != COUNTER64_SENTINEL);
@@ -145,6 +169,18 @@ static void fillOutput(SnmpData &out, bool hc) {
                          g_outOctets != COUNTER32_SENTINEL);
     out.inOctets  = (uint64_t)g_inOctets;
     out.outOctets = (uint64_t)g_outOctets;
+  }
+
+  if (g_sysUpTimeTicks != TIMETICKS_SENTINEL) {
+    out.systemUptimeSec = g_sysUpTimeTicks / 100U;
+    out.systemUptimeValid = true;
+  }
+
+  g_ifAliasRaw[sizeof(g_ifAliasRaw) - 1] = '\0';
+  if (g_ifAliasRaw[0] != '\0') {
+    strncpy(out.interfaceAlias, g_ifAliasRaw, sizeof(out.interfaceAlias) - 1);
+    out.interfaceAlias[sizeof(out.interfaceAlias) - 1] = '\0';
+    out.interfaceAliasValid = true;
   }
 }
 

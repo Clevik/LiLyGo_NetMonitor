@@ -6,6 +6,7 @@
 body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#eee;padding:16px}
 h1{color:#07ff;text-align:center;margin:12px 0}
 .card{background:#16213e;border-radius:10px;padding:16px;margin:12px 0}
+.card h2{color:#07ff;font-size:18px;margin-bottom:12px}
 label{display:block;margin:8px 0 4px;font-size:14px;color:#aaa}
 input,select{width:100%;padding:10px;border:1px solid #333;border-radius:6px;
   background:#0f3460;color:#fff;font-size:16px}
@@ -20,9 +21,15 @@ input:focus{border-color:#07ff}
 .btn2:hover{background:#777}
 small{color:#666;font-size:12px}
 #status{text-align:center;padding:8px;color:#07ff;display:none}
+.scheme-preview{display:flex;gap:12px;margin-top:10px}
+.scheme-preview-item{flex:1;text-align:center}
+.scheme-swatch{height:34px;border:1px solid #666;border-radius:6px;margin-bottom:4px}
+.toggle{display:flex;align-items:center;gap:10px;margin-top:12px;color:#ddd}
+.toggle input{width:auto;transform:scale(1.2)}
 </style></head><body>
 <h1>NETMONITOR</h1>
 <div class='card'>
+<h2>Config</h2>
 <label>Router IP</label>
 <input id='router'>
 <label>SNMP Port</label>
@@ -34,8 +41,17 @@ small{color:#666;font-size:12px}
 <label>Interface Index</label>
 <input id='ifidx' type='number' min='1' step='1'>
 <small>Required WAN interface index. 0 is not supported.</small>
+<label>Router API Login</label>
+<input id='apilogin' autocomplete='username' placeholder='Optional'>
+<label>Router API Password</label>
+<input id='apipass' type='password' autocomplete='current-password' placeholder='Optional'>
+<small>Optional. Enables WAN connection status and uptime through an RCI-compatible HTTP API.</small>
+<label>Router API Interface</label>
+<input id='apiinterface' required maxlength='63' pattern='[A-Za-z0-9._-]{1,63}' value='UsbLte0'>
+<small>Interface used by /rci/show/interface/&lt;interface&gt;.</small>
 </div>
 <div class='card'>
+<h2>Time Intervals</h2>
 <label>Ping Host</label>
 <input id='ping'>
 <label>External Ping Interval (sec)</label>
@@ -44,24 +60,147 @@ small{color:#666;font-size:12px}
 <label>SNMP Poll Interval (sec)</label>
 <input id='intv' type='number' min='1' max='3600' step='1' value='5'>
 <small>How often to poll router SNMP status and traffic counters.</small>
+<label>Router API Poll Interval (sec)</label>
+<input id='rciintv' type='number' min='1' max='3600' step='1' value='15'>
+<small>How often to request WAN state and uptime from the router API.</small>
 <label>Wi-Fi Retry Delay (sec)</label>
 <input id='wretry' type='number' min='1' max='3600' step='1' value='20'>
 <small>Wait time between Wi-Fi reconnection attempts when the network is unavailable.</small>
+</div>
+<div class='card'>
+<h2>UI</h2>
+<label>Display Rotation</label>
+<select id='rotation'><option value='0'>0°</option></select>
+<small>The new rotation is applied immediately without restarting the device.</small>
+<label>Color Scheme</label>
+<select id='colorScheme' onchange='updateColorSchemePreview()'>
+<option value='0'>Default</option>
+</select>
+<div class='scheme-preview'>
+<div class='scheme-preview-item'>
+<div id='incomingSwatch' class='scheme-swatch'></div><small>Incoming</small>
+</div>
+<div class='scheme-preview-item'>
+<div id='outgoingSwatch' class='scheme-swatch'></div><small>Outgoing</small>
+</div>
+</div>
+<small>The new color scheme is applied immediately without restarting the device.</small>
+</div>
+<div class='card'>
+<h2>Power Safe</h2>
+<label>Startup / Normal Brightness</label>
+<select id='startupBrightness'>
+<option value='25'>25%</option><option value='50'>50%</option>
+<option value='75'>75%</option><option value='100'>100%</option>
+</select>
+<label class='toggle'><input id='autoOffEnabled' type='checkbox' onchange='updatePowerVisibility()'>Auto-off screen after inactivity</label>
+<div id='autoOffFields'>
+<label>Screen Off Timeout (minutes)</label>
+<input id='autoOffMinutes' type='number' min='1' max='1440' step='1' value='5'>
+</div>
+<label class='toggle'><input id='scheduleEnabled' type='checkbox' onchange='updatePowerVisibility()'>Enable night brightness schedule</label>
+<div id='scheduleFields'>
+<label>Time Zone (IANA)</label>
+<input id='timeZone' list='timeZones' autocomplete='off' value='Europe/Moscow'>
+<datalist id='timeZones'></datalist>
+<label>Night Starts</label>
+<input id='nightStart' type='time' value='23:00'>
+<label>Night Ends</label>
+<input id='nightEnd' type='time' value='07:00'>
+<label>Night Brightness</label>
+<select id='nightBrightness'>
+<option value='0'>Off</option><option value='25'>25%</option>
+<option value='50'>50%</option><option value='75'>75%</option>
+<option value='100'>100%</option>
+</select>
+</div>
+<small>Brightness changes in 25% steps. Monitoring continues while the screen is off; a tap wakes it.</small>
 </div>
 <div id='status'></div>
 <button class='btn' onclick='doSave()'>Save</button>
 <a class='btn2' href='/ota'>Firmware Update (OTA)</a>
 <script>
+function setRotationOptions(d){
+  var values=Array.isArray(d.supportedRotations)?d.supportedRotations:[0];
+  var select=document.getElementById('rotation');
+  select.innerHTML=values.map(v=>'<option value="'+v+'">'+v+'°</option>').join('');
+  select.value=String(d.rotation||0);
+}
+var availableColorSchemes=[];
+function setColorSchemeOptions(d){
+  availableColorSchemes=Array.isArray(d.colorSchemes)?d.colorSchemes:[];
+  var select=document.getElementById('colorScheme');
+  select.innerHTML=availableColorSchemes
+    .map(s=>'<option value="'+s.id+'">'+s.name+'</option>').join('');
+  select.value=String(Number.isInteger(d.colorScheme)?d.colorScheme:0);
+  updateColorSchemePreview();
+}
+function updateColorSchemePreview(){
+  var id=+document.getElementById('colorScheme').value;
+  var scheme=availableColorSchemes.find(s=>s.id===id);
+  document.getElementById('incomingSwatch').style.background=
+    scheme?scheme.incoming:'#000';
+  document.getElementById('outgoingSwatch').style.background=
+    scheme?scheme.outgoing:'#000';
+}
+function minuteToTime(minute){
+  var value=Number.isInteger(minute)?minute:0;
+  return String(Math.floor(value/60)).padStart(2,'0')+':'+
+    String(value%60).padStart(2,'0');
+}
+function timeToMinute(value){
+  var parts=value.split(':');
+  return parts.length===2?(+parts[0])*60+(+parts[1]):NaN;
+}
+function setPowerSafe(d){
+  var p=d.powerSafe||{};
+  document.getElementById('startupBrightness').value=String(p.startupBrightness||100);
+  document.getElementById('autoOffEnabled').checked=!!p.autoOffEnabled;
+  document.getElementById('autoOffMinutes').value=p.autoOffMinutes||5;
+  document.getElementById('scheduleEnabled').checked=!!p.scheduleEnabled;
+  document.getElementById('timeZone').value=p.timeZone||'Europe/Moscow';
+  document.getElementById('nightStart').value=minuteToTime(
+    Number.isInteger(p.nightStartMinute)?p.nightStartMinute:1380);
+  document.getElementById('nightEnd').value=minuteToTime(
+    Number.isInteger(p.nightEndMinute)?p.nightEndMinute:420);
+  document.getElementById('nightBrightness').value=String(
+    Number.isInteger(p.nightBrightness)?p.nightBrightness:25);
+  updatePowerVisibility();
+}
+function updatePowerVisibility(){
+  document.getElementById('autoOffFields').hidden=
+    !document.getElementById('autoOffEnabled').checked;
+  document.getElementById('scheduleFields').hidden=
+    !document.getElementById('scheduleEnabled').checked;
+}
+function loadTimeZones(){
+  fetch('/api/timezones').then(r=>r.json()).then(zones=>{
+    var list=document.getElementById('timeZones');
+    list.innerHTML='';
+    zones.sort().forEach(zone=>{
+      var option=document.createElement('option');
+      option.value=zone;
+      list.appendChild(option);
+    });
+  }).catch(()=>{});
+}
 fetch('/api/settings').then(r=>r.json()).then(d=>{
   document.getElementById('router').value=d.router||'';
   document.getElementById('sport').value=d.sport||161;
   document.getElementById('sver').value=d.sver||2;
   document.getElementById('scom').value=d.scom||'';
   document.getElementById('ifidx').value=d.ifidx||'';
+  document.getElementById('apilogin').value=d.apilogin||'';
+  document.getElementById('apipass').value=d.apipass||'';
+  document.getElementById('apiinterface').value=d.apiinterface||'UsbLte0';
+  document.getElementById('rciintv').value=d.rciintv||15;
   document.getElementById('ping').value=d.ping||'';
   document.getElementById('pintv').value=d.pintv||5;
   document.getElementById('intv').value=d.intv||5;
   document.getElementById('wretry').value=d.wretry||20;
+  setRotationOptions(d);
+  setColorSchemeOptions(d);
+  setPowerSafe(d);
 }).catch(()=>{});
 function validInterval(v){return v>=1&&v<=3600&&Math.floor(v)===v;}
 function validPort(v){return v>=1&&v<=65535&&Math.floor(v)===v;}
@@ -70,21 +209,50 @@ function doSave(){
   var sport=+document.getElementById('sport').value;
   var pintv=+document.getElementById('pintv').value;
   var intv=+document.getElementById('intv').value;
+  var rciintv=+document.getElementById('rciintv').value;
   var wretry=+document.getElementById('wretry').value;
+  var rotation=+document.getElementById('rotation').value;
+  var colorScheme=+document.getElementById('colorScheme').value;
+  var autoOffMinutes=+document.getElementById('autoOffMinutes').value;
+  var nightStartMinute=timeToMinute(document.getElementById('nightStart').value);
+  var nightEndMinute=timeToMinute(document.getElementById('nightEnd').value);
+  var timeZone=document.getElementById('timeZone').value.trim();
+  var apiinterface=document.getElementById('apiinterface').value.trim();
   if(!ifidx||ifidx<1||Math.floor(ifidx)!==ifidx){alert('Enter Interface Index greater than 0');return;}
   if(!validPort(sport)){alert('SNMP Port must be 1..65535');return;}
+  if(!/^[A-Za-z0-9._-]{1,63}$/.test(apiinterface)){alert('Router API Interface must be 1..63 path-safe characters');return;}
   if(!validInterval(pintv)||!validInterval(intv)){alert('Ping and SNMP intervals must be 1..3600 sec');return;}
+  if(!validInterval(rciintv)){alert('Router API Poll Interval must be 1..3600 sec');return;}
   if(!validInterval(wretry)){alert('Wi-Fi Retry Delay must be 1..3600 sec');return;}
+  if(!Number.isInteger(autoOffMinutes)||autoOffMinutes<1||autoOffMinutes>1440){alert('Screen Off Timeout must be 1..1440 min');return;}
+  if(!Number.isInteger(nightStartMinute)||!Number.isInteger(nightEndMinute)){alert('Enter a valid night period');return;}
+  if(!timeZone){alert('Select an IANA time zone');return;}
   var d={
     router:document.getElementById('router').value,
     sport:sport,
     sver:+document.getElementById('sver').value,
     scom:document.getElementById('scom').value,
     ifidx:ifidx,
+    apilogin:document.getElementById('apilogin').value,
+    apipass:document.getElementById('apipass').value,
+    apiinterface:apiinterface,
+    rciintv:rciintv,
     ping:document.getElementById('ping').value,
     pintv:pintv,
     intv:intv,
-    wretry:wretry
+    wretry:wretry,
+    rotation:rotation,
+    colorScheme:colorScheme,
+    powerSafe:{
+      startupBrightness:+document.getElementById('startupBrightness').value,
+      autoOffEnabled:document.getElementById('autoOffEnabled').checked,
+      autoOffMinutes:autoOffMinutes,
+      scheduleEnabled:document.getElementById('scheduleEnabled').checked,
+      nightStartMinute:nightStartMinute,
+      nightEndMinute:nightEndMinute,
+      nightBrightness:+document.getElementById('nightBrightness').value,
+      timeZone:timeZone
+    }
   };
   if(!d.router.trim()){alert('Enter Router IP');return;}
   if(!d.scom.trim()){alert('Enter SNMP Community');return;}
@@ -96,4 +264,5 @@ function doSave(){
     .then(r=>r.text()).then(t=>{st.textContent=t;})
     .catch(e=>{st.textContent='Error: '+e;});
 }
+loadTimeZones();
 </script></body></html>
