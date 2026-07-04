@@ -1695,7 +1695,9 @@ bool uiHandleTap(int16_t x, int16_t y) {
     uint32_t now = millis();
     g_lastGlobeFrameMs = now;
     if (g_globeAnimationRunning && g_globeRestUntilMs != 0) {
-      g_globeRestUntilMs = now + GLOBE_REST_DURATION_MS;
+      g_globeRestUntilMs = 0;
+      g_globeFrame =
+          (g_globeFrame + 1) % static_cast<uint8_t>(GLOBE_FRAME_COUNT);
     }
     g_redrawRequested = true;
     Serial.printf("[UI] globe animation -> %s\n",
