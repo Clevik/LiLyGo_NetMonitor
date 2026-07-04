@@ -1,20 +1,210 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Arduino_GFX_Library.h>
+#include <esp_heap_caps.h>
+#include <soc/soc_memory_types.h>
+#include <cmath>
+#include <cstring>
 
 #include "config.h"
+#include "settings.h"
+#include "color_schemes.h"
+#if defined(HW_AMOLED_143)
+  #include "globe_frames.h"
+  #include "internet_icon.h"
+  #include "router_icon.h"
+#endif
 #include "ui.h"
 
-static Arduino_DataBus *g_bus = nullptr;
-static Arduino_GFX     *g_gfx = nullptr;
+static Arduino_DataBus *g_bus    = nullptr;
+static Arduino_GFX     *g_disp   = nullptr;
+static Arduino_Canvas  *g_canvas = nullptr;
 
 static char g_fmtBuf[32];
+static char g_connectSsid[64];
+static char g_routerIp[20] = "192.168.1.1";
 
-static void fillZone(uint16_t y, uint16_t h, uint16_t color) {
-  g_gfx->fillRect(0, y, SCREEN_W, h, color);
+static BrightnessLevel g_brightness = BrightnessLevel::Full;
+static bool g_redrawRequested = false;
+
+constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
+  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
-bool uiInit() {
+constexpr uint16_t rgb565(uint32_t rgb) {
+  return rgb565(static_cast<uint8_t>((rgb >> 16) & 0xFF),
+                static_cast<uint8_t>((rgb >> 8) & 0xFF),
+                static_cast<uint8_t>(rgb & 0xFF));
+}
+
+struct UiColorPalette {
+  uint16_t incoming;
+  uint16_t outgoing;
+  uint16_t incomingDim;
+  uint16_t outgoingDim;
+};
+
+static UiColorPalette g_colorPalette = {};
+
+static uint32_t dimRgb(uint32_t rgb) {
+  constexpr uint32_t DIM_PERCENT = 16;
+  uint32_t r = ((rgb >> 16) & 0xFF) * DIM_PERCENT / 100;
+  uint32_t g = ((rgb >> 8) & 0xFF) * DIM_PERCENT / 100;
+  uint32_t b = (rgb & 0xFF) * DIM_PERCENT / 100;
+  return (r << 16) | (g << 8) | b;
+}
+
+static bool setActiveColorScheme(ColorScheme colorScheme) {
+  const ColorSchemeDefinition *definition =
+      findColorSchemeDefinition(colorScheme);
+  if (!definition) {
+    return false;
+  }
+
+  g_colorPalette.incoming = rgb565(definition->incomingRgb);
+  g_colorPalette.outgoing = rgb565(definition->outgoingRgb);
+#if defined(HW_AMOLED_143)
+  if (colorScheme == ColorScheme::Default) {
+    g_colorPalette.incomingDim = rgb565(0x00, 0x28, 0x10);
+    g_colorPalette.outgoingDim = rgb565(0x00, 0x18, 0x30);
+  } else
+#endif
+  {
+    g_colorPalette.incomingDim =
+        rgb565(dimRgb(definition->incomingRgb));
+    g_colorPalette.outgoingDim =
+        rgb565(dimRgb(definition->outgoingRgb));
+  }
+  return true;
+}
+
+#if defined(HW_AMOLED_143)
+static constexpr uint8_t GLOBE_REST_FRAME_INDEX = 4;
+static constexpr uint32_t GLOBE_REST_DURATION_MS = 15000;
+static_assert(GLOBE_REST_FRAME_INDEX < GLOBE_FRAME_COUNT);
+
+static bool g_globeAnimationRunning = true;
+static uint8_t g_globeFrame = GLOBE_REST_FRAME_INDEX;
+static uint32_t g_lastGlobeFrameMs = 0;
+static uint32_t g_globeRestUntilMs = 0;
+#endif
+
+#define DISP_CMD_BRIGHTNESS 0x51
+#define DISP_CMD_DISPON     0x29
+#define DISP_CMD_DISPOFF    0x28
+
+constexpr uint16_t GRAPH_POINTS = 120;
+static float g_histIn[GRAPH_POINTS]  = {};
+static float g_histOut[GRAPH_POINTS] = {};
+static uint16_t g_histCount = 0;
+static uint16_t g_histHead  = 0;
+static uint32_t g_lastHistMs = 0;
+
+#if defined(HW_AMOLED_143)
+constexpr uint16_t PING_ARC_POINTS = 60;
+
+enum class PingArcSampleState : uint8_t {
+  Success,
+  Loss,
+  Unavailable,
+};
+
+static uint32_t g_routerPingHistory[PING_ARC_POINTS] = {};
+static uint32_t g_externalPingHistory[PING_ARC_POINTS] = {};
+static PingArcSampleState g_routerPingState[PING_ARC_POINTS] = {};
+static PingArcSampleState g_externalPingState[PING_ARC_POINTS] = {};
+static uint16_t g_pingHistCount = 0;
+static uint16_t g_pingHistHead = 0;
+#endif
+
+static void logMemoryState(const char *stage) {
+  Serial.printf(
+    "[UI] memory %s: heap free=%u largest=%u min=%u; psram found=%s size=%u free=%u largest=%u min=%u\n",
+    stage,
+    static_cast<unsigned>(ESP.getFreeHeap()),
+    static_cast<unsigned>(ESP.getMaxAllocHeap()),
+    static_cast<unsigned>(ESP.getMinFreeHeap()),
+    psramFound() ? "yes" : "no",
+    static_cast<unsigned>(ESP.getPsramSize()),
+    static_cast<unsigned>(ESP.getFreePsram()),
+    static_cast<unsigned>(ESP.getMaxAllocPsram()),
+    static_cast<unsigned>(ESP.getMinFreePsram()));
+  Serial.printf(
+    "[UI] heap caps %s: internal free=%u largest=%u; spiram free=%u largest=%u\n",
+    stage,
+    static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+    static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+    static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+    static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+}
+
+static void logCanvasFramebuffer(const char *stage) {
+  if (!g_canvas) {
+    Serial.printf("[UI] canvas %s: object is null\n", stage);
+    return;
+  }
+
+  uint16_t *fb = g_canvas->getFramebuffer();
+  if (!fb) {
+    Serial.printf("[UI] canvas %s: framebuffer is null\n", stage);
+    return;
+  }
+
+  Serial.printf(
+    "[UI] canvas %s: framebuffer=%p allocated=%u bytes location=%s\n",
+    stage,
+    fb,
+    static_cast<unsigned>(heap_caps_get_allocated_size(fb)),
+    esp_ptr_external_ram(fb) ? "PSRAM" : (esp_ptr_internal(fb) ? "internal" : "unknown"));
+}
+
+static void pushHistory(float inBps, float outBps) {
+  g_histIn[g_histHead]  = inBps;
+  g_histOut[g_histHead] = outBps;
+  g_histHead = (g_histHead + 1) % GRAPH_POINTS;
+  if (g_histCount < GRAPH_POINTS) g_histCount++;
+}
+
+#if defined(HW_AMOLED_143)
+static void pushPingHistory(const Telemetry &t) {
+  if (t.routerPingValid) {
+    g_routerPingHistory[g_pingHistHead] = t.routerPingMs;
+    g_routerPingState[g_pingHistHead] = PingArcSampleState::Success;
+  } else {
+    g_routerPingHistory[g_pingHistHead] = 0;
+    g_routerPingState[g_pingHistHead] = PingArcSampleState::Loss;
+  }
+
+  if (t.pingValid && !t.pingLoss) {
+    g_externalPingHistory[g_pingHistHead] = t.pingMs;
+    g_externalPingState[g_pingHistHead] = PingArcSampleState::Success;
+  } else {
+    g_externalPingHistory[g_pingHistHead] = 0;
+    g_externalPingState[g_pingHistHead] =
+        t.pingLoss ? PingArcSampleState::Loss
+                   : PingArcSampleState::Unavailable;
+  }
+
+  g_pingHistHead = (g_pingHistHead + 1) % PING_ARC_POINTS;
+  if (g_pingHistCount < PING_ARC_POINTS) g_pingHistCount++;
+}
+#endif
+
+bool uiInit(uint16_t displayRotation,
+            ColorScheme colorScheme,
+            BrightnessLevel startupBrightness) {
+  if (!isDisplayRotationSupported(displayRotation) ||
+      !setActiveColorScheme(colorScheme) ||
+      !isBrightnessLevelSupported(startupBrightness, false)) {
+    return false;
+  }
+
+  Serial.printf("[UI] canvas need: %ux%u RGB565 = %u bytes\n",
+        static_cast<unsigned>(SCREEN_W),
+        static_cast<unsigned>(SCREEN_H),
+        static_cast<unsigned>(CANVAS_BUFFER_BYTES));
+  logMemoryState("before init");
+
   pinMode(DISP_PWR_PIN, OUTPUT);
   digitalWrite(DISP_PWR_PIN, HIGH);
 
@@ -22,151 +212,1542 @@ bool uiInit() {
     DISP_CS, DISP_SCK,
     DISP_D0, DISP_D1, DISP_D2, DISP_D3);
 
-  g_gfx = new Arduino_RM67162(g_bus, DISP_RST, 1, false);
+#if defined(HW_DISP_RM67162)
+  g_disp = new Arduino_RM67162(g_bus, DISP_RST, DISP_ROTATION, false);
+#elif defined(HW_DISP_CO5300)
+  g_disp = new Arduino_CO5300(g_bus, DISP_RST, DISP_ROTATION, false,
+                              SCREEN_W, SCREEN_H);
+#else
+  #error "Неизвестный драйвер дисплея. Определите HW_DISP_* в hardware/*.h"
+#endif
 
-  if (!g_gfx->begin()) {
-    Serial.println("[UI] gfx->begin() failed!");
+  g_canvas = new Arduino_Canvas(SCREEN_W, SCREEN_H, g_disp);
+  g_canvas->setRotation(static_cast<uint8_t>(displayRotation / 90));
+  if (!g_canvas->begin()) {
+    Serial.printf("[UI] canvas->begin() failed: need %u bytes, psram found=%s\n",
+          static_cast<unsigned>(CANVAS_BUFFER_BYTES),
+          psramFound() ? "yes" : "no");
+    logCanvasFramebuffer("after failed begin");
+    logMemoryState("after failed begin");
     return false;
   }
+  logCanvasFramebuffer("after begin");
+  logMemoryState("after begin");
 
-  g_gfx->fillScreen(CLR_BG);
-  g_gfx->setTextColor(CLR_TEXT, CLR_BG);
+  g_canvas->fillScreen(CLR_BG);
+  g_canvas->flush();
+  uiSetBrightness(startupBrightness);
+  g_canvas->setTextColor(CLR_TEXT, CLR_BG);
   return true;
 }
 
-void uiShowSplash() {
-  g_gfx->fillScreen(CLR_BG);
-  g_gfx->setTextSize(4);
-  g_gfx->setCursor(80, 90);
-  g_gfx->setTextColor(CLR_PING);
-  g_gfx->print("NETMONITOR");
-  g_gfx->setTextSize(2);
-  g_gfx->setCursor(180, 140);
-  g_gfx->setTextColor(CLR_DIM);
-  g_gfx->print("boot...");
+bool uiApplyDisplaySettings(uint16_t displayRotation,
+                            ColorScheme colorScheme) {
+  if (!g_canvas || !isDisplayRotationSupported(displayRotation) ||
+      !setActiveColorScheme(colorScheme)) {
+    return false;
+  }
+
+  g_canvas->setRotation(static_cast<uint8_t>(displayRotation / 90));
+  g_canvas->fillScreen(CLR_BG);
+  g_canvas->flush();
+  g_redrawRequested = true;
+  const ColorSchemeDefinition *definition =
+      findColorSchemeDefinition(colorScheme);
+  Serial.printf("[UI] display rotation=%u degrees, color scheme=%s\n",
+                static_cast<unsigned>(displayRotation),
+                definition ? definition->name : "unknown");
+  return true;
 }
 
+static void flush() {
+  g_canvas->flush();
+}
+
+#if defined(HW_AMOLED_143)
+namespace RoundServiceLayout {
+constexpr int16_t CENTER_X = SCREEN_W / 2;
+
+constexpr int16_t SPLASH_TITLE_CENTER_Y = 214;
+constexpr int16_t SPLASH_DETAIL_CENTER_Y = 252;
+
+constexpr int16_t AP_TITLE_CENTER_Y = 166;
+constexpr int16_t AP_URL_CENTER_Y = 216;
+constexpr int16_t AP_INSTRUCTION_CENTER_Y = 248;
+constexpr int16_t AP_RESET_CENTER_Y = 298;
+
+constexpr int16_t CONNECT_STATUS_CENTER_Y = 214;
+constexpr int16_t CONNECT_SSID_CENTER_Y = 254;
+
+constexpr int16_t RECONNECT_LOST_CENTER_Y = 155;
+constexpr int16_t RECONNECT_RETRY_CENTER_Y = 205;
+constexpr int16_t RECONNECT_SSID_CENTER_Y = 255;
+constexpr int16_t RECONNECT_RESET_CENTER_Y = 305;
+}  // namespace RoundServiceLayout
+
+static int16_t roundServiceTextWidth(const char *text, uint8_t size) {
+  return static_cast<int16_t>(std::strlen(text) * 6U * size);
+}
+
+static int16_t roundServiceTextHeight(uint8_t size) {
+  return static_cast<int16_t>(8U * size);
+}
+
+static int16_t roundServiceTextLeft(const char *text, uint8_t size) {
+  return RoundServiceLayout::CENTER_X -
+         roundServiceTextWidth(text, size) / 2;
+}
+
+static void drawRoundServiceText(const char *text,
+                                 int16_t centerY,
+                                 uint8_t size,
+                                 uint16_t color) {
+  g_canvas->setTextSize(size);
+  g_canvas->setTextColor(color);
+  g_canvas->setCursor(
+      roundServiceTextLeft(text, size),
+      centerY - roundServiceTextHeight(size) / 2);
+  g_canvas->print(text);
+}
+#endif
+
+void uiShowSplash() {
+  g_canvas->fillScreen(CLR_BG);
+#if defined(HW_AMOLED_143)
+  drawRoundServiceText("NETMONITOR",
+                       RoundServiceLayout::SPLASH_TITLE_CENTER_Y,
+                       4, CLR_PING);
+  drawRoundServiceText("boot...",
+                       RoundServiceLayout::SPLASH_DETAIL_CENTER_Y,
+                       2, CLR_DIM);
+#else
+  g_canvas->setTextSize(4);
+  g_canvas->setCursor(80, 90);
+  g_canvas->setTextColor(CLR_PING);
+  g_canvas->print("NETMONITOR");
+  g_canvas->setTextSize(2);
+  g_canvas->setCursor(180, 140);
+  g_canvas->setTextColor(CLR_DIM);
+  g_canvas->print("boot...");
+#endif
+  flush();
+}
+
+enum class SpeedFormatStyle : uint8_t {
+  RectValue,
+  RoundCompact,
+  GraphLabel,
+};
+
+static void formatSpeedText(double bps,
+                            SpeedFormatStyle style,
+                            char *val,
+                            size_t vLen,
+                            const char **unit) {
+  if (!val || vLen == 0 || !unit) return;
+
+  if (!std::isfinite(bps) || bps <= 0.0) {
+    snprintf(val, vLen, (style == SpeedFormatStyle::RoundCompact) ? "-" : "0");
+    *unit = (style == SpeedFormatStyle::RoundCompact) ? "Mbps" :
+            (style == SpeedFormatStyle::GraphLabel) ? "bt" : "bit";
+    return;
+  }
+
+  double kbps = bps / 1000.0;
+  double mbps = kbps / 1000.0;
+
+  switch (style) {
+    case SpeedFormatStyle::RectValue:
+      if (kbps < 1.0) {
+        snprintf(val, vLen, "%.0f", bps);
+        *unit = "bit";
+      } else if (mbps < 1.0) {
+        snprintf(val, vLen, "%.0f", kbps);
+        *unit = "Kbit";
+      } else {
+        snprintf(val, vLen, "%.1f", mbps);
+        *unit = "Mbit";
+      }
+      break;
+
+    case SpeedFormatStyle::RoundCompact:
+      if (mbps >= 1.0) {
+        snprintf(val, vLen, (mbps < 100.0) ? "%.1f" : "%.0f", mbps);
+        *unit = "Mbps";
+      } else if (kbps >= 1.0) {
+        snprintf(val, vLen, "%.0f", kbps);
+        *unit = "Kbps";
+      } else {
+        snprintf(val, vLen, "%.0f", bps);
+        *unit = "bps";
+      }
+      break;
+
+    case SpeedFormatStyle::GraphLabel:
+      if (kbps < 1.0) {
+        snprintf(val, vLen, "%.0f", bps);
+        *unit = "bt";
+      } else if (mbps < 1.0) {
+        snprintf(val, vLen, "%.0f", kbps);
+        *unit = "Kb";
+      } else {
+        snprintf(val, vLen, (mbps < 10.0) ? "%.1f" : "%.0f", mbps);
+        *unit = "Mb";
+      }
+      break;
+  }
+}
+
+static constexpr uint32_t ROUTER_INFO_SWITCH_MS = 5000;
+
+enum class RouterInfoMode : uint8_t {
+  Ip,
+  SystemUptime,
+  WanUptime,
+};
+
+static RouterInfoMode currentRouterInfoMode(const Telemetry &t) {
+  uint8_t count = 1;
+  if (t.systemUptimeValid) count++;
+  if (t.wanUptimeValid) count++;
+
+  uint8_t slot = (millis() / ROUTER_INFO_SWITCH_MS) % count;
+  if (slot == 0) return RouterInfoMode::Ip;
+  if (t.systemUptimeValid && slot == 1) return RouterInfoMode::SystemUptime;
+  return RouterInfoMode::WanUptime;
+}
+
+static void formatInterfaceUptime(uint32_t uptimeSec, char *out, size_t outLen) {
+  uint32_t totalMinutes = uptimeSec / 60U;
+  uint32_t days = totalMinutes / (24U * 60U);
+  uint32_t hours = (totalMinutes / 60U) % 24U;
+  uint32_t minutes = totalMinutes % 60U;
+
+  if (days > 0) {
+    snprintf(out, outLen, "%lud %luh %lum",
+             static_cast<unsigned long>(days),
+             static_cast<unsigned long>(hours),
+             static_cast<unsigned long>(minutes));
+  } else if (hours > 0) {
+    snprintf(out, outLen, "%luh %lum",
+             static_cast<unsigned long>(hours),
+             static_cast<unsigned long>(minutes));
+  } else {
+    snprintf(out, outLen, "%lum",
+             static_cast<unsigned long>(minutes));
+  }
+}
+
+static void formatRouterInfo(const Telemetry &t,
+                             char *title,
+                             size_t titleLen,
+                             char *value,
+                             size_t valueLen) {
+  switch (currentRouterInfoMode(t)) {
+    case RouterInfoMode::SystemUptime:
+      snprintf(title, titleLen, "UPTIME SYSTEM");
+      formatInterfaceUptime(t.systemUptimeSec, value, valueLen);
+      return;
+    case RouterInfoMode::WanUptime:
+      snprintf(title, titleLen, "UPTIME WAN");
+      formatInterfaceUptime(t.wanUptimeSec, value, valueLen);
+      return;
+    case RouterInfoMode::Ip:
+    default:
+      snprintf(title, titleLen, "ROUTER");
+      snprintf(value, valueLen, "%s", g_routerIp);
+      return;
+  }
+}
+
+static void updateTrafficHistory(const Telemetry &t) {
+  if (!t.dataValid) return;
+
+  uint32_t now = millis();
+  if (now - g_lastHistMs >= 1000) {
+    g_lastHistMs = now;
+    pushHistory((float)t.inBps, (float)t.outBps);
+#if defined(HW_AMOLED_143)
+    pushPingHistory(t);
+#endif
+  }
+}
+
+void uiObserveTelemetry(const Telemetry &t) {
+  updateTrafficHistory(t);
+}
+
+static const char *wanConnectionStateText(WanConnectionState state) {
+  switch (state) {
+    case WanConnectionState::Disconnected:
+      return "DOWN";
+    case WanConnectionState::Initializing:
+      return "INIT";
+    case WanConnectionState::WaitingForNetwork:
+      return "WAIT";
+    case WanConnectionState::Requesting:
+    case WanConnectionState::Other:
+      return "CONN";
+    case WanConnectionState::Connected:
+      return "UP";
+    case WanConnectionState::Unknown:
+    default:
+      return "----";
+  }
+}
+
+static uint16_t wanConnectionStateRectColor(WanConnectionState state) {
+  switch (state) {
+    case WanConnectionState::Disconnected:
+      return CLR_STATUS_DN;
+    case WanConnectionState::Initializing:
+    case WanConnectionState::WaitingForNetwork:
+      return CLR_STATUS_UNC;
+    case WanConnectionState::Requesting:
+    case WanConnectionState::Other:
+      return CLR_STATUS_CONN;
+    case WanConnectionState::Connected:
+      return CLR_STATUS_UP;
+    case WanConnectionState::Unknown:
+    default:
+      return CLR_DIM;
+  }
+}
+
+static const char *statusText(const Telemetry &t) {
+  if (!t.dataValid) return "----";
+  if (t.wanConnectionStateValid) {
+    return wanConnectionStateText(t.wanConnectionState);
+  }
+  return t.linkUp ? "UP" : "DOWN";
+}
+
+static uint16_t statusColorRect(const Telemetry &t) {
+  if (!t.dataValid) return CLR_DIM;
+  if (t.wanConnectionStateValid) {
+    return wanConnectionStateRectColor(t.wanConnectionState);
+  }
+  if (t.linkUp) {
+    if (t.pingLoss && !t.linkUncertain) return CLR_STATUS_DN;
+    if (t.linkUncertain) return CLR_STATUS_UNC;
+    return CLR_STATUS_UP;
+  }
+  if (t.pingValid && !t.pingLoss) return CLR_STATUS_UNC;
+  return CLR_STATUS_DN;
+}
+
+#if defined(HW_AMOLED_143)
+static constexpr uint16_t CLR_ROUND_STATUS_UP = rgb565(0x00, 0xFF, 0x40);
+static constexpr uint16_t CLR_ROUND_WARN     = rgb565(0xFF, 0xB0, 0x00);
+static constexpr uint16_t CLR_ROUND_ALARM    = rgb565(0xFF, 0x30, 0x30);
+
+namespace RoundLayout {
+constexpr int16_t CENTER_X = SCREEN_W / 2;
+constexpr int16_t CENTER_Y = SCREEN_H / 2;
+
+constexpr int16_t OUTER_RING_RADIUS = 228;
+constexpr int16_t INNER_RING_RADIUS = 223;
+
+constexpr int16_t HISTORY_ARC_RADIUS = 205;
+constexpr float HISTORY_ARC_BOTTOM_ANGLE_DEG = 18.0f;
+constexpr float HISTORY_IN_START_DEG = 130.0f;
+constexpr float HISTORY_IN_END_DEG = 180.0f + HISTORY_ARC_BOTTOM_ANGLE_DEG;
+constexpr float HISTORY_OUT_START_DEG = 50.0f;
+constexpr float HISTORY_OUT_END_DEG = -HISTORY_ARC_BOTTOM_ANGLE_DEG;
+constexpr int16_t HISTORY_ARC_MIN_BAR_LEN = 2;
+constexpr int16_t HISTORY_ARC_MAX_BAR_LEN = 28;
+
+constexpr int16_t LINE_GRAPH_Y = 343;
+constexpr int16_t LINE_GRAPH_H = 89;
+constexpr int16_t LINE_GRAPH_IN_X = 60;
+constexpr int16_t LINE_GRAPH_IN_W = 169;
+constexpr int16_t LINE_GRAPH_OUT_X = 238;
+constexpr int16_t LINE_GRAPH_OUT_W = 168;
+
+constexpr int16_t ROUTER_TITLE_Y = 30;
+constexpr uint8_t ROUTER_TITLE_TEXT_SIZE = 2;
+constexpr uint8_t ROUTER_VALUE_TEXT_SIZE = 3;
+constexpr int16_t ROUTER_TITLE_VALUE_GAP = 10;
+constexpr int16_t STATUS_PDF_Y = 360;
+constexpr int16_t STATUS_CENTER_X_OFFSET = 3;
+
+constexpr int16_t GLOBE_RADIUS = 80;
+constexpr int16_t GLOBE_CENTER_Y = 211;
+constexpr int16_t SPEED_ZONE_CENTER_Y = 314;
+constexpr int16_t SPEED_UNIT_CENTER_Y = 322;
+constexpr int16_t SPEED_IN_ZONE_X = 54;
+constexpr int16_t SPEED_OUT_ZONE_X = 238;
+constexpr int16_t PING_VALUE_PDF_Y = 210;
+constexpr uint8_t PING_VALUE_TEXT_SIZE = ROUTER_VALUE_TEXT_SIZE;
+constexpr int16_t PING_MAX_VALUE_DIGITS = 5;
+constexpr int16_t PING_ZONE_W =
+    PING_MAX_VALUE_DIGITS * 6 * PING_VALUE_TEXT_SIZE;
+constexpr int16_t PING_ZONE_LEFT_X =
+    CENTER_X - GLOBE_RADIUS - PING_ZONE_W;
+constexpr int16_t PING_ZONE_RIGHT_X = CENTER_X + GLOBE_RADIUS + 1;
+constexpr int16_t PING_LEFT_CENTER_X = PING_ZONE_LEFT_X + PING_ZONE_W / 2;
+constexpr int16_t PING_RIGHT_CENTER_X = PING_ZONE_RIGHT_X + PING_ZONE_W / 2;
+constexpr int16_t PING_ZONE_Y = 155;
+constexpr int16_t PING_ICON_TOP_Y = PING_ZONE_Y + 7;
+constexpr uint8_t PING_STATS_TEXT_SIZE = ROUTER_TITLE_TEXT_SIZE;
+constexpr int16_t PING_STATS_CENTER_Y = 262;
+
+constexpr uint8_t SPEED_VALUE_TEXT_SIZE = 4;
+constexpr uint8_t SPEED_UNIT_TEXT_SIZE = 2;
+constexpr int16_t SPEED_ARROW_SHAFT_W = 5;
+constexpr int16_t SPEED_ARROW_SHAFT_H = 17;
+constexpr int16_t SPEED_ARROW_HEAD_HALF_W = 11;
+constexpr int16_t SPEED_ARROW_HEAD_BASE_OFFSET = 1;
+constexpr int16_t SPEED_ARROW_HEAD_TIP_OFFSET = 14;
+constexpr int16_t SPEED_ARROW_DOWN_SHAFT_TOP_OFFSET = -14;
+constexpr int16_t SPEED_ARROW_UP_SHAFT_TOP_OFFSET = -2;
+constexpr int16_t SPEED_ARROW_CENTER_X_OFFSET = SPEED_ARROW_HEAD_HALF_W;
+constexpr int16_t SPEED_VALUE_LEFT_X_OFFSET =
+    SPEED_ARROW_HEAD_HALF_W * 2 + 8;
+constexpr int16_t SPEED_VALUE_UNIT_GAP = 4;
+
+constexpr int16_t CENTER_DIVIDER_TOP_Y = 297;
+constexpr int16_t CENTER_DIVIDER_BOTTOM_Y = 431;
+
+constexpr int16_t DEVICE_IP_CENTER_Y = 444;
+
+constexpr uint16_t GLOBE_FRAME_MS = UI_ROUND_FRAME_MS;
+
+constexpr int16_t PING_VALUE_Y_OFFSET = -22;
+}  // namespace RoundLayout
+
+struct RoundDebugZone {
+  const char *label;
+  int16_t x;
+  int16_t y;
+  int16_t w;
+  int16_t h;
+  uint16_t color;
+};
+
+static constexpr int16_t centerYFromPdf(int16_t pdfY) {
+  return static_cast<int16_t>(SCREEN_H) - pdfY;
+}
+
+static int16_t textPixelWidth(const char *text, uint8_t size) {
+  return static_cast<int16_t>(std::strlen(text) * 6U * size);
+}
+
+static int16_t textPixelHeight(uint8_t size) {
+  return static_cast<int16_t>(8U * size);
+}
+
+static int16_t routerValueCenterY() {
+  return static_cast<int16_t>(
+      RoundLayout::ROUTER_TITLE_Y +
+      textPixelHeight(RoundLayout::ROUTER_TITLE_TEXT_SIZE) / 2 +
+      RoundLayout::ROUTER_TITLE_VALUE_GAP +
+      textPixelHeight(RoundLayout::ROUTER_VALUE_TEXT_SIZE) / 2);
+}
+
+static void drawTextCentered(const char *text,
+                             int16_t centerX,
+                             int16_t centerY,
+                             uint8_t size,
+                             uint16_t color,
+                             uint16_t bg = CLR_BG) {
+  g_canvas->setTextSize(size);
+  g_canvas->setTextColor(color, bg);
+  g_canvas->setCursor(centerX - textPixelWidth(text, size) / 2,
+                      centerY - textPixelHeight(size) / 2);
+  g_canvas->print(text);
+}
+
+static void drawTextCenteredGlow(const char *text,
+                                 int16_t centerX,
+                                 int16_t centerY,
+                                 uint8_t size,
+                                 uint16_t color,
+                                 uint16_t glow) {
+  drawTextCentered(text, centerX - 1, centerY, size, glow);
+  drawTextCentered(text, centerX + 1, centerY, size, glow);
+  drawTextCentered(text, centerX, centerY - 1, size, glow);
+  drawTextCentered(text, centerX, centerY + 1, size, glow);
+  drawTextCentered(text, centerX, centerY, size, color);
+}
+
+static void drawRoundDebugZone(const RoundDebugZone &zone) {
+  g_canvas->drawRect(zone.x, zone.y, zone.w, zone.h, zone.color);
+  if (zone.w > 4 && zone.h > 4) {
+    g_canvas->drawRect(zone.x + 1, zone.y + 1, zone.w - 2, zone.h - 2,
+                       zone.color);
+  }
+
+  g_canvas->setTextSize(1);
+  g_canvas->setTextColor(zone.color, CLR_BG);
+  g_canvas->setCursor(zone.x + 3, zone.y + 3);
+  g_canvas->print(zone.label);
+}
+
+static void drawRoundDebugZones() {
+  static constexpr RoundDebugZone zones[] = {
+      {"SCREEN", 0, 0, SCREEN_W, SCREEN_H, CLR_DIM},
+  };
+
+  for (const RoundDebugZone &zone : zones) {
+    drawRoundDebugZone(zone);
+  }
+}
+
+static uint16_t wanConnectionStateRoundColor(WanConnectionState state) {
+  switch (state) {
+    case WanConnectionState::Disconnected:
+      return CLR_ROUND_ALARM;
+    case WanConnectionState::Initializing:
+    case WanConnectionState::WaitingForNetwork:
+      return CLR_ROUND_WARN;
+    case WanConnectionState::Requesting:
+    case WanConnectionState::Other:
+      return CLR_STATUS_CONN;
+    case WanConnectionState::Connected:
+      return CLR_ROUND_STATUS_UP;
+    case WanConnectionState::Unknown:
+    default:
+      return CLR_DIM;
+  }
+}
+
+static uint16_t statusColor(const Telemetry &t) {
+  if (!t.dataValid) return CLR_DIM;
+  if (t.wanConnectionStateValid) {
+    return wanConnectionStateRoundColor(t.wanConnectionState);
+  }
+  if (t.linkUp) {
+    if (t.pingLoss && !t.linkUncertain) return CLR_ROUND_ALARM;
+    if (t.linkUncertain) return CLR_ROUND_WARN;
+    return CLR_ROUND_STATUS_UP;
+  }
+  if (t.pingValid && !t.pingLoss) return CLR_ROUND_WARN;
+  return CLR_ROUND_ALARM;
+}
+
+static uint16_t historyStartIndex() {
+  return (g_histHead + GRAPH_POINTS - g_histCount) % GRAPH_POINTS;
+}
+
+static uint16_t historyIndexFromOldest(uint16_t offset) {
+  return (historyStartIndex() + offset) % GRAPH_POINTS;
+}
+
+static float historyMax(const float *data, uint16_t offset, uint16_t count) {
+  float maxVal = 1.0f;
+  for (uint16_t i = 0; i < count; i++) {
+    uint16_t idx = historyIndexFromOldest(offset + i);
+    if (data[idx] > maxVal) maxVal = data[idx];
+  }
+  return maxVal;
+}
+
+static float lineGraphWindowMax(const float *data, int16_t width) {
+  if (!data || g_histCount == 0 || width <= 0) return 1.0f;
+
+  uint16_t samples = g_histCount;
+  if (samples > static_cast<uint16_t>(width)) {
+    samples = static_cast<uint16_t>(width);
+  }
+  return historyMax(data, g_histCount - samples, samples);
+}
+
+static void drawLineGraph(const float *data,
+                          int16_t x,
+                          int16_t y,
+                          int16_t w,
+                          int16_t h,
+                          uint16_t color,
+                          uint16_t glowColor) {
+  if (g_histCount < 2) return;
+
+  uint16_t samples = g_histCount;
+  if (samples > static_cast<uint16_t>(w)) samples = static_cast<uint16_t>(w);
+  uint16_t offset = g_histCount - samples;
+  float maxVal = lineGraphWindowMax(data, w);
+  int16_t graphBottom = y + h - 3;
+  int16_t graphHeight = h - 2;
+
+  int16_t prevX = -1;
+  int16_t prevY = -1;
+  for (uint16_t i = 0; i < samples; i++) {
+    uint16_t idx = historyIndexFromOldest(offset + i);
+    int16_t px = x + static_cast<int16_t>((static_cast<int32_t>(i) * (w - 1)) / (samples - 1));
+    int16_t py =
+        graphBottom -
+        static_cast<int16_t>((data[idx] / maxVal) * (graphHeight - 1));
+    if (prevX >= 0) {
+      g_canvas->drawLine(prevX, prevY + 2, px, py + 2, glowColor);
+      g_canvas->drawLine(prevX, prevY + 1, px, py + 1, glowColor);
+      g_canvas->drawLine(prevX, prevY, px, py, color);
+    }
+    prevX = px;
+    prevY = py;
+  }
+}
+
+static void drawGraphMaxPill(float bps, int16_t x, int16_t y) {
+  constexpr uint16_t CLR_LABEL_BG = 0x39E7;
+  constexpr int16_t PAD = 4;
+  constexpr int16_t RAD = 3;
+  constexpr int16_t CH_W = 12;
+  constexpr int16_t CH_H = 16;
+
+  char value[16];
+  const char *unit = "bt";
+  formatSpeedText(bps, SpeedFormatStyle::GraphLabel, value, sizeof(value),
+                  &unit);
+
+  int textLen = std::strlen(value) + 1 + std::strlen(unit);
+  int16_t width = textLen * CH_W + PAD * 2;
+  int16_t height = CH_H + PAD * 2;
+  g_canvas->fillRoundRect(x, y, width, height, RAD, CLR_LABEL_BG);
+  g_canvas->setTextSize(2);
+  g_canvas->setTextColor(CLR_TEXT, CLR_LABEL_BG);
+  g_canvas->setCursor(x + PAD, y + PAD);
+  g_canvas->print(value);
+  g_canvas->print(" ");
+  g_canvas->print(unit);
+}
+
+static void drawArcSegment(int16_t cx,
+                           int16_t cy,
+                           int16_t radius,
+                           float startDeg,
+                           float endDeg,
+                           uint16_t color,
+                           uint8_t thickness = 1) {
+  static constexpr float DEG = 3.1415926535f / 180.0f;
+  int16_t prevX = 0;
+  int16_t prevY = 0;
+  bool havePrev = false;
+  auto appendPoint = [&](float angleDeg) {
+    float rad = angleDeg * DEG;
+    int16_t px = cx + static_cast<int16_t>(cosf(rad) * radius);
+    int16_t py = cy - static_cast<int16_t>(sinf(rad) * radius);
+    if (havePrev) {
+      for (uint8_t t = 0; t < thickness; t++) {
+        g_canvas->drawLine(prevX, prevY + t, px, py + t, color);
+      }
+    }
+    prevX = px;
+    prevY = py;
+    havePrev = true;
+  };
+
+  float step = (endDeg >= startDeg) ? 4.0f : -4.0f;
+  for (float angle = startDeg;
+       (step > 0.0f) ? (angle <= endDeg) : (angle >= endDeg);
+       angle += step) {
+    appendPoint(angle);
+  }
+  appendPoint(endDeg);
+}
+
+static uint16_t pingHistoryStartIndex() {
+  return (g_pingHistHead + PING_ARC_POINTS - g_pingHistCount) %
+         PING_ARC_POINTS;
+}
+
+static uint16_t pingHistoryIndexFromOldest(uint16_t offset) {
+  return (pingHistoryStartIndex() + offset) % PING_ARC_POINTS;
+}
+
+static uint32_t pingHistoryMax(const uint32_t *values,
+                               const PingArcSampleState *states) {
+  uint32_t maxValue = 1;
+  for (uint16_t i = 0; i < g_pingHistCount; i++) {
+    uint16_t idx = pingHistoryIndexFromOldest(i);
+    if (states[idx] == PingArcSampleState::Success &&
+        values[idx] > maxValue) {
+      maxValue = values[idx];
+    }
+  }
+  return maxValue;
+}
+
+struct PingHistoryRange {
+  bool valid;
+  uint32_t minValue;
+  uint32_t maxValue;
+};
+
+static PingHistoryRange pingHistoryRange(
+    const uint32_t *values,
+    const PingArcSampleState *states) {
+  PingHistoryRange range = {false, 0, 0};
+  for (uint16_t i = 0; i < g_pingHistCount; i++) {
+    uint16_t idx = pingHistoryIndexFromOldest(i);
+    if (states[idx] != PingArcSampleState::Success) continue;
+
+    uint32_t value = values[idx];
+    if (!range.valid) {
+      range.valid = true;
+      range.minValue = value;
+      range.maxValue = value;
+      continue;
+    }
+    if (value < range.minValue) range.minValue = value;
+    if (value > range.maxValue) range.maxValue = value;
+  }
+  return range;
+}
+
+static void drawPingHistoryArc(const uint32_t *values,
+                               const PingArcSampleState *states,
+                               float startDeg,
+                               float endDeg,
+                               uint16_t color,
+                               uint16_t dimColor) {
+  static constexpr float DEG = 3.1415926535f / 180.0f;
+
+  drawArcSegment(RoundLayout::CENTER_X, RoundLayout::CENTER_Y,
+                 RoundLayout::HISTORY_ARC_RADIUS, startDeg, endDeg,
+                 dimColor, 2);
+
+  uint32_t maxValue = pingHistoryMax(values, states);
+  uint16_t emptySlots = PING_ARC_POINTS - g_pingHistCount;
+
+  for (uint16_t i = 0; i < PING_ARC_POINTS; i++) {
+    PingArcSampleState state = PingArcSampleState::Success;
+    uint32_t value = 0;
+    bool filled = i >= emptySlots;
+    if (filled) {
+      uint16_t idx = pingHistoryIndexFromOldest(i - emptySlots);
+      state = states[idx];
+      value = values[idx];
+    }
+
+    float pos = static_cast<float>(i) /
+                static_cast<float>(PING_ARC_POINTS - 1);
+    float angle = startDeg + (endDeg - startDeg) * pos;
+    int16_t length = RoundLayout::HISTORY_ARC_MIN_BAR_LEN;
+    uint16_t barColor = color;
+
+    if (filled && state == PingArcSampleState::Success) {
+      float norm = static_cast<float>(value) /
+                   static_cast<float>(maxValue);
+      if (norm > 1.0f) norm = 1.0f;
+      length += static_cast<int16_t>(
+          norm * (RoundLayout::HISTORY_ARC_MAX_BAR_LEN -
+                  RoundLayout::HISTORY_ARC_MIN_BAR_LEN));
+      barColor = color;
+    } else if (state == PingArcSampleState::Loss) {
+      barColor = CLR_ROUND_ALARM;
+    }
+
+    float rad = angle * DEG;
+    int16_t x0 = RoundLayout::CENTER_X +
+                 static_cast<int16_t>(cosf(rad) * (RoundLayout::HISTORY_ARC_RADIUS + 2));
+    int16_t y0 = RoundLayout::CENTER_Y -
+                 static_cast<int16_t>(sinf(rad) * (RoundLayout::HISTORY_ARC_RADIUS + 2));
+    int16_t x1 = RoundLayout::CENTER_X +
+                 static_cast<int16_t>(cosf(rad) *
+                                      (RoundLayout::HISTORY_ARC_RADIUS + 2 - length));
+    int16_t y1 = RoundLayout::CENTER_Y -
+                 static_cast<int16_t>(sinf(rad) *
+                                      (RoundLayout::HISTORY_ARC_RADIUS + 2 - length));
+    g_canvas->drawLine(x0, y0, x1, y1, barColor);
+    g_canvas->drawLine(x0, y0 + 1, x1, y1 + 1, barColor);
+  }
+}
+
+static void drawRouterIcon(int16_t centerX, int16_t topY, uint16_t color) {
+  int16_t x0 = centerX - ROUTER_ICON_W / 2;
+  for (uint16_t y = 0; y < ROUTER_ICON_H; y++) {
+    for (uint16_t byteX = 0; byteX < ROUTER_ICON_BYTES_PER_ROW; byteX++) {
+      uint16_t offset = y * ROUTER_ICON_BYTES_PER_ROW + byteX;
+      uint8_t mask = pgm_read_byte(&ROUTER_ICON_DATA[offset]);
+      if (!mask) continue;
+      for (uint8_t bit = 0; bit < 8; bit++) {
+        if (mask & (0x80 >> bit)) {
+          g_canvas->drawPixel(x0 + byteX * 8 + bit, topY + y, color);
+        }
+      }
+    }
+  }
+}
+
+static void drawGlobeIcon(int16_t centerX, int16_t topY, uint16_t color) {
+  int16_t x0 = centerX - INTERNET_ICON_W / 2;
+  for (uint16_t y = 0; y < INTERNET_ICON_H; y++) {
+    for (uint16_t byteX = 0; byteX < INTERNET_ICON_BYTES_PER_ROW; byteX++) {
+      uint16_t offset = y * INTERNET_ICON_BYTES_PER_ROW + byteX;
+      uint8_t mask = pgm_read_byte(&INTERNET_ICON_DATA[offset]);
+      if (!mask) continue;
+      for (uint8_t bit = 0; bit < 8; bit++) {
+        if (mask & (0x80 >> bit)) {
+          g_canvas->drawPixel(x0 + byteX * 8 + bit, topY + y, color);
+        }
+      }
+    }
+  }
+}
+
+static void drawDownArrow(int16_t x, int16_t y, uint16_t color) {
+  g_canvas->fillRect(
+      x - RoundLayout::SPEED_ARROW_SHAFT_W / 2,
+      y + RoundLayout::SPEED_ARROW_DOWN_SHAFT_TOP_OFFSET,
+      RoundLayout::SPEED_ARROW_SHAFT_W,
+      RoundLayout::SPEED_ARROW_SHAFT_H, color);
+  g_canvas->fillTriangle(
+      x - RoundLayout::SPEED_ARROW_HEAD_HALF_W,
+      y + RoundLayout::SPEED_ARROW_HEAD_BASE_OFFSET,
+      x + RoundLayout::SPEED_ARROW_HEAD_HALF_W,
+      y + RoundLayout::SPEED_ARROW_HEAD_BASE_OFFSET,
+      x, y + RoundLayout::SPEED_ARROW_HEAD_TIP_OFFSET, color);
+}
+
+static void drawUpArrow(int16_t x, int16_t y, uint16_t color) {
+  g_canvas->fillRect(
+      x - RoundLayout::SPEED_ARROW_SHAFT_W / 2,
+      y + RoundLayout::SPEED_ARROW_UP_SHAFT_TOP_OFFSET,
+      RoundLayout::SPEED_ARROW_SHAFT_W,
+      RoundLayout::SPEED_ARROW_SHAFT_H, color);
+  g_canvas->fillTriangle(
+      x - RoundLayout::SPEED_ARROW_HEAD_HALF_W,
+      y - RoundLayout::SPEED_ARROW_HEAD_BASE_OFFSET,
+      x + RoundLayout::SPEED_ARROW_HEAD_HALF_W,
+      y - RoundLayout::SPEED_ARROW_HEAD_BASE_OFFSET,
+      x, y - RoundLayout::SPEED_ARROW_HEAD_TIP_OFFSET, color);
+}
+
+static void drawGlobeFrame(int16_t centerX, int16_t centerY) {
+  uint32_t now = millis();
+  if (g_lastGlobeFrameMs == 0) {
+    g_lastGlobeFrameMs = now;
+  }
+
+  if (g_globeAnimationRunning) {
+    if (g_globeRestUntilMs != 0) {
+      if (static_cast<int32_t>(now - g_globeRestUntilMs) >= 0) {
+        g_globeRestUntilMs = 0;
+        g_lastGlobeFrameMs = now;
+      }
+    } else {
+      uint32_t elapsed = now - g_lastGlobeFrameMs;
+      uint32_t steps = elapsed / RoundLayout::GLOBE_FRAME_MS;
+      while (steps > 0) {
+        g_lastGlobeFrameMs += RoundLayout::GLOBE_FRAME_MS;
+        g_globeFrame =
+            (g_globeFrame + 1) % static_cast<uint8_t>(GLOBE_FRAME_COUNT);
+        steps--;
+
+        if (g_globeFrame == GLOBE_REST_FRAME_INDEX) {
+          g_globeRestUntilMs = now + GLOBE_REST_DURATION_MS;
+          g_lastGlobeFrameMs = now;
+          break;
+        }
+      }
+    }
+  }
+
+  int16_t x0 = centerX - GLOBE_FRAME_W / 2;
+  int16_t y0 = centerY - GLOBE_FRAME_H / 2;
+
+  g_canvas->fillCircle(centerX, centerY, RoundLayout::GLOBE_RADIUS,
+                       rgb565(0x00, 0x06, 0x10));
+
+  for (uint16_t y = 0; y < GLOBE_FRAME_H; y++) {
+    for (uint16_t byteX = 0; byteX < GLOBE_FRAME_W / 8; byteX++) {
+      uint16_t offset = y * (GLOBE_FRAME_W / 8) + byteX;
+      uint8_t mask = pgm_read_byte(&GLOBE_FRAME_DATA[g_globeFrame][offset]);
+      if (!mask) continue;
+      for (uint8_t bit = 0; bit < 8; bit++) {
+        if (mask & (0x80 >> bit)) {
+          g_canvas->drawPixel(x0 + byteX * 8 + bit, y0 + y,
+                              g_colorPalette.outgoing);
+        }
+      }
+    }
+  }
+}
+
+static void drawPingBlock(int16_t centerX,
+                          int16_t valueY,
+                          bool valid,
+                          bool loss,
+                          uint32_t ms,
+                          uint16_t color,
+                          uint16_t dimColor,
+                          const uint32_t *history,
+                          const PingArcSampleState *historyStates) {
+  if (loss || !valid) {
+    drawTextCentered(loss ? "loss" : "--", centerX,
+                     valueY + RoundLayout::PING_VALUE_Y_OFFSET,
+                     RoundLayout::PING_VALUE_TEXT_SIZE,
+                     loss ? CLR_ROUND_ALARM : CLR_DIM);
+  } else {
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(ms));
+    drawTextCenteredGlow(buf, centerX,
+                         valueY + RoundLayout::PING_VALUE_Y_OFFSET,
+                         RoundLayout::PING_VALUE_TEXT_SIZE,
+                         color, dimColor);
+  }
+
+  PingHistoryRange range = pingHistoryRange(history, historyStates);
+  char stats[28];
+  if (range.valid) {
+    snprintf(stats, sizeof(stats), "%u/%u",
+             static_cast<unsigned>(range.minValue),
+             static_cast<unsigned>(range.maxValue));
+  } else {
+    snprintf(stats, sizeof(stats), "-/-");
+  }
+  drawTextCentered(stats, centerX, RoundLayout::PING_STATS_CENTER_Y,
+                   RoundLayout::PING_STATS_TEXT_SIZE, CLR_TEXT);
+}
+
+static void drawSpeedBlock(int16_t zoneX,
+                           bool upload,
+                           double bps) {
+  uint16_t color =
+      upload ? g_colorPalette.outgoing : g_colorPalette.incoming;
+  char value[16];
+  const char *unit = "Mbps";
+  formatSpeedText(bps, SpeedFormatStyle::RoundCompact, value, sizeof(value),
+                  &unit);
+
+  int16_t centerY = RoundLayout::SPEED_ZONE_CENTER_Y;
+  int16_t arrowX = zoneX + RoundLayout::SPEED_ARROW_CENTER_X_OFFSET;
+  int16_t valueLeft = zoneX + RoundLayout::SPEED_VALUE_LEFT_X_OFFSET;
+  int16_t valueW =
+      textPixelWidth(value, RoundLayout::SPEED_VALUE_TEXT_SIZE);
+  int16_t unitLeft =
+      valueLeft + valueW + RoundLayout::SPEED_VALUE_UNIT_GAP;
+  int16_t unitW = textPixelWidth(unit, RoundLayout::SPEED_UNIT_TEXT_SIZE);
+
+  if (upload) {
+    drawUpArrow(arrowX, centerY, color);
+  } else {
+    drawDownArrow(arrowX, centerY, color);
+  }
+  drawTextCenteredGlow(value, valueLeft + valueW / 2, centerY,
+                       RoundLayout::SPEED_VALUE_TEXT_SIZE, CLR_TEXT,
+                       upload ? g_colorPalette.outgoingDim
+                              : g_colorPalette.incomingDim);
+  drawTextCentered(unit, unitLeft + unitW / 2,
+                   RoundLayout::SPEED_UNIT_CENTER_Y,
+                   RoundLayout::SPEED_UNIT_TEXT_SIZE, CLR_TEXT);
+}
+#endif  // defined(HW_AMOLED_143)
+
 void uiShowApConfig(const char *apName, const char *apIp) {
-  g_gfx->fillScreen(CLR_BG);
+  g_canvas->fillScreen(CLR_BG);
 
-  g_gfx->setTextSize(3);
-  g_gfx->setTextColor(CLR_STATUS_DN);
-  g_gfx->setCursor(20, 20);
-  g_gfx->print("AP: ");
-  g_gfx->setTextColor(CLR_TEXT);
-  g_gfx->print(apName);
+#if defined(HW_AMOLED_143)
+  const char *safeApName = apName ? apName : "";
+  const char *safeApIp = apIp ? apIp : "";
 
-  g_gfx->setTextSize(2);
-  g_gfx->setTextColor(CLR_DIM);
-  g_gfx->setCursor(20, 70);
-  g_gfx->print("Open http://");
-  g_gfx->print(apIp);
+  char title[48];
+  snprintf(title, sizeof(title), "AP: %s", safeApName);
+  g_canvas->setTextSize(3);
+  g_canvas->setCursor(
+      roundServiceTextLeft(title, 3),
+      RoundServiceLayout::AP_TITLE_CENTER_Y -
+          roundServiceTextHeight(3) / 2);
+  g_canvas->setTextColor(CLR_STATUS_DN);
+  g_canvas->print("AP: ");
+  g_canvas->setTextColor(CLR_TEXT);
+  g_canvas->print(safeApName);
 
-  g_gfx->setCursor(20, 100);
-  g_gfx->print("to configure device");
+  char url[48];
+  snprintf(url, sizeof(url), "Open http://%s", safeApIp);
+  drawRoundServiceText(url, RoundServiceLayout::AP_URL_CENTER_Y,
+                       2, CLR_DIM);
+  drawRoundServiceText("to configure device",
+                       RoundServiceLayout::AP_INSTRUCTION_CENTER_Y,
+                       2, CLR_DIM);
+  drawRoundServiceText("Hold KEY >3s to reset",
+                       RoundServiceLayout::AP_RESET_CENTER_Y,
+                       2, CLR_PING);
+#else
+  g_canvas->setTextSize(3);
+  g_canvas->setTextColor(CLR_STATUS_DN);
+  g_canvas->setCursor(20, 20);
+  g_canvas->print("AP: ");
+  g_canvas->setTextColor(CLR_TEXT);
+  g_canvas->print(apName);
 
-  g_gfx->setTextSize(2);
-  g_gfx->setTextColor(CLR_PING);
-  g_gfx->setCursor(20, 160);
-  g_gfx->print("Hold KEY >3s to reset");
+  g_canvas->setTextSize(2);
+  g_canvas->setTextColor(CLR_DIM);
+  g_canvas->setCursor(20, 70);
+  g_canvas->print("Open http://");
+  g_canvas->print(apIp);
+
+  g_canvas->setCursor(20, 100);
+  g_canvas->print("to configure device");
+
+  g_canvas->setTextSize(2);
+  g_canvas->setTextColor(CLR_PING);
+  g_canvas->setCursor(20, 160);
+  g_canvas->print("Hold KEY >3s to reset");
+#endif
+  flush();
 }
 
 void uiShowConnecting(const char *ssid) {
-  g_gfx->fillScreen(CLR_BG);
-  g_gfx->setTextSize(3);
-  g_gfx->setTextColor(CLR_TEXT);
-  g_gfx->setCursor(20, 60);
-  g_gfx->print("Connecting...");
-  g_gfx->setTextSize(2);
-  g_gfx->setTextColor(CLR_DIM);
-  g_gfx->setCursor(20, 110);
-  g_gfx->print("SSID: ");
-  g_gfx->print(ssid);
+  std::strncpy(g_connectSsid, ssid ? ssid : "", sizeof(g_connectSsid) - 1);
+  g_connectSsid[sizeof(g_connectSsid) - 1] = '\0';
+  uiUpdateConnecting();
+}
+
+void uiSetRouterIp(const char *ip) {
+  std::strncpy(g_routerIp, ip ? ip : "", sizeof(g_routerIp) - 1);
+  g_routerIp[sizeof(g_routerIp) - 1] = '\0';
+}
+
+void uiUpdateConnecting() {
+  uint8_t frame = (millis() / 400) % 5;
+
+  g_canvas->fillScreen(CLR_BG);
+
+#if defined(HW_AMOLED_143)
+  constexpr char CONNECTING_TEXT[] = "Connecting ....";
+  g_canvas->setTextSize(3);
+  g_canvas->setTextColor(CLR_TEXT);
+  g_canvas->setCursor(
+      roundServiceTextLeft(CONNECTING_TEXT, 3),
+      RoundServiceLayout::CONNECT_STATUS_CENTER_Y -
+          roundServiceTextHeight(3) / 2);
+  g_canvas->print("Connecting ");
+
+  for (int i = 0; i < 4; i++) {
+    g_canvas->setTextColor(
+      (frame < 4 && i == frame) ? CLR_PING : CLR_DIM);
+    g_canvas->print(".");
+  }
+
+  char ssidLine[48];
+  snprintf(ssidLine, sizeof(ssidLine), "SSID: %s", g_connectSsid);
+  drawRoundServiceText(ssidLine,
+                       RoundServiceLayout::CONNECT_SSID_CENTER_Y,
+                       2, CLR_DIM);
+#else
+  g_canvas->setTextSize(3);
+  g_canvas->setTextColor(CLR_TEXT);
+  g_canvas->setCursor(20, 60);
+  g_canvas->print("Connecting ");
+
+  for (int i = 0; i < 4; i++) {
+    g_canvas->setTextColor(
+      (frame < 4 && i == frame) ? CLR_PING : CLR_DIM);
+    g_canvas->print(".");
+  }
+
+  g_canvas->setTextSize(2);
+  g_canvas->setTextColor(CLR_DIM);
+  g_canvas->setCursor(20, 110);
+  g_canvas->print("SSID: ");
+  g_canvas->print(g_connectSsid);
+#endif
+  flush();
+}
+
+void uiShowReconnectWait(const char *ssid, uint32_t remainSec) {
+  g_canvas->fillScreen(CLR_BG);
+
+#if defined(HW_AMOLED_143)
+  drawRoundServiceText("Wi-Fi lost",
+                       RoundServiceLayout::RECONNECT_LOST_CENTER_Y,
+                       3, CLR_STATUS_DN);
+
+  char retryLine[32];
+  snprintf(retryLine, sizeof(retryLine), "Retry in %us",
+           static_cast<unsigned>(remainSec));
+  drawRoundServiceText(retryLine,
+                       RoundServiceLayout::RECONNECT_RETRY_CENTER_Y,
+                       3, CLR_TEXT);
+
+  char ssidLine[48];
+  snprintf(ssidLine, sizeof(ssidLine), "SSID: %s", ssid ? ssid : "");
+  drawRoundServiceText(ssidLine,
+                       RoundServiceLayout::RECONNECT_SSID_CENTER_Y,
+                       2, CLR_DIM);
+  drawRoundServiceText("Hold KEY >3s to reset",
+                       RoundServiceLayout::RECONNECT_RESET_CENTER_Y,
+                       2, CLR_DIM);
+#else
+  g_canvas->setTextSize(3);
+  g_canvas->setTextColor(CLR_STATUS_DN);
+  g_canvas->setCursor(20, 50);
+  g_canvas->print("Wi-Fi lost");
+
+  g_canvas->setTextSize(3);
+  g_canvas->setTextColor(CLR_TEXT);
+  g_canvas->setCursor(20, 95);
+  g_canvas->print("Retry in ");
+  g_canvas->print(remainSec);
+  g_canvas->print("s");
+
+  g_canvas->setTextSize(2);
+  g_canvas->setTextColor(CLR_DIM);
+  g_canvas->setCursor(20, 145);
+  g_canvas->print("SSID: ");
+  g_canvas->print(ssid ? ssid : "");
+
+  g_canvas->setTextSize(2);
+  g_canvas->setTextColor(CLR_DIM);
+  g_canvas->setCursor(20, 185);
+  g_canvas->print("Hold KEY >3s to reset");
+#endif
+  flush();
+}
+
+#if defined(HW_AMOLED_143)
+static void uiShowMainRound(const Telemetry &t) {
+  g_canvas->fillScreen(CLR_BG);
+
+  // Тонкие внутренние кольца помогают круглому экрану выглядеть как макет,
+  // но остаются внутри физической active area.
+  g_canvas->drawCircle(RoundLayout::CENTER_X, RoundLayout::CENTER_Y,
+                       RoundLayout::OUTER_RING_RADIUS,
+                       rgb565(0x28, 0x2D, 0x33));
+  g_canvas->drawCircle(RoundLayout::CENTER_X, RoundLayout::CENTER_Y,
+                       RoundLayout::INNER_RING_RADIUS,
+                       rgb565(0x11, 0x16, 0x1C));
+
+  drawPingHistoryArc(g_routerPingHistory, g_routerPingState,
+                     RoundLayout::HISTORY_IN_START_DEG,
+                     RoundLayout::HISTORY_IN_END_DEG,
+                     g_colorPalette.incoming,
+                     g_colorPalette.incomingDim);
+  drawPingHistoryArc(g_externalPingHistory, g_externalPingState,
+                     RoundLayout::HISTORY_OUT_START_DEG,
+                     RoundLayout::HISTORY_OUT_END_DEG,
+                     g_colorPalette.outgoing,
+                     g_colorPalette.outgoingDim);
+
+  drawLineGraph(g_histIn, RoundLayout::LINE_GRAPH_IN_X,
+                RoundLayout::LINE_GRAPH_Y,
+                RoundLayout::LINE_GRAPH_IN_W, RoundLayout::LINE_GRAPH_H,
+                g_colorPalette.incoming, g_colorPalette.incomingDim);
+  drawLineGraph(g_histOut, RoundLayout::LINE_GRAPH_OUT_X,
+                RoundLayout::LINE_GRAPH_Y,
+                RoundLayout::LINE_GRAPH_OUT_W, RoundLayout::LINE_GRAPH_H,
+                g_colorPalette.outgoing, g_colorPalette.outgoingDim);
+  if (g_histCount >= 2) {
+    drawGraphMaxPill(
+        lineGraphWindowMax(g_histIn, RoundLayout::LINE_GRAPH_IN_W),
+        RoundLayout::LINE_GRAPH_IN_X + 4, RoundLayout::LINE_GRAPH_Y + 2);
+    drawGraphMaxPill(
+        lineGraphWindowMax(g_histOut, RoundLayout::LINE_GRAPH_OUT_W),
+        RoundLayout::LINE_GRAPH_OUT_X + 4, RoundLayout::LINE_GRAPH_Y + 2);
+  }
+
+  drawGlobeFrame(RoundLayout::CENTER_X, RoundLayout::GLOBE_CENTER_Y);
+
+  drawRouterIcon(RoundLayout::PING_LEFT_CENTER_X,
+                 RoundLayout::PING_ICON_TOP_Y,
+                 g_colorPalette.incoming);
+  drawGlobeIcon(RoundLayout::PING_RIGHT_CENTER_X,
+                RoundLayout::PING_ICON_TOP_Y,
+                g_colorPalette.outgoing);
+
+  {
+    char title[48];
+    char value[32];
+    formatRouterInfo(t, title, sizeof(title), value, sizeof(value));
+    drawTextCentered(title, RoundLayout::CENTER_X,
+                     RoundLayout::ROUTER_TITLE_Y,
+                     RoundLayout::ROUTER_TITLE_TEXT_SIZE, CLR_META);
+    drawTextCentered(value, RoundLayout::CENTER_X,
+                     routerValueCenterY(),
+                     RoundLayout::ROUTER_VALUE_TEXT_SIZE, CLR_TEXT);
+  }
+  drawTextCenteredGlow(statusText(t),
+                       RoundLayout::CENTER_X +
+                           RoundLayout::STATUS_CENTER_X_OFFSET,
+                       centerYFromPdf(RoundLayout::STATUS_PDF_Y),
+                       5, statusColor(t), statusColor(t));
+
+  bool routerValid = t.dataValid && t.routerPingValid;
+  drawPingBlock(RoundLayout::PING_LEFT_CENTER_X,
+                centerYFromPdf(RoundLayout::PING_VALUE_PDF_Y),
+                routerValid, t.dataValid && !t.routerPingValid,
+                t.routerPingMs, g_colorPalette.incoming,
+                g_colorPalette.incomingDim,
+                g_routerPingHistory, g_routerPingState);
+  drawPingBlock(RoundLayout::PING_RIGHT_CENTER_X,
+                centerYFromPdf(RoundLayout::PING_VALUE_PDF_Y),
+                t.dataValid && t.pingValid, t.dataValid && t.pingLoss,
+                t.pingMs, g_colorPalette.outgoing,
+                g_colorPalette.outgoingDim,
+                g_externalPingHistory, g_externalPingState);
+
+  g_canvas->drawLine(RoundLayout::CENTER_X,
+                     RoundLayout::CENTER_DIVIDER_TOP_Y,
+                     RoundLayout::CENTER_X,
+                     RoundLayout::CENTER_DIVIDER_BOTTOM_Y,
+                     rgb565(0x80, 0x80, 0x80));
+  drawSpeedBlock(RoundLayout::SPEED_IN_ZONE_X, false, t.inBps);
+  drawSpeedBlock(RoundLayout::SPEED_OUT_ZONE_X, true, t.outBps);
+
+  String ip = WiFi.localIP().toString();
+  drawTextCentered(ip.c_str(), RoundLayout::CENTER_X,
+                   RoundLayout::DEVICE_IP_CENTER_Y,
+                   RoundLayout::ROUTER_TITLE_TEXT_SIZE, CLR_META);
+
+  drawRoundDebugZones();
+
+  flush();
+}
+#endif  // defined(HW_AMOLED_143)
+
+static void drawRectGlobeIcon(int16_t cx, int16_t cy, uint16_t color) {
+  g_canvas->drawCircle(cx, cy, 8, color);
+  g_canvas->drawLine(cx - 7, cy, cx + 7, cy, color);
+  g_canvas->drawLine(cx, cy - 8, cx, cy + 8, color);
+  g_canvas->drawLine(cx - 4, cy - 6, cx - 2, cy + 6, color);
+  g_canvas->drawLine(cx + 4, cy - 6, cx + 2, cy + 6, color);
+}
+
+static void drawRectRouterIcon(int16_t cx, int16_t cy, uint16_t color) {
+  g_canvas->drawRect(cx - 8, cy - 4, 16, 9, color);
+  g_canvas->fillCircle(cx - 4, cy + 1, 1, color);
+  g_canvas->fillCircle(cx, cy + 1, 1, color);
+  g_canvas->drawLine(cx - 5, cy - 4, cx - 8, cy - 9, color);
+  g_canvas->drawLine(cx + 5, cy - 4, cx + 8, cy - 9, color);
+}
+
+static void drawRectPingValue(const char *value,
+                              int16_t y,
+                              uint16_t color,
+                              bool externalPing) {
+  constexpr uint8_t TEXT_SIZE = 3;
+  constexpr int16_t ICON_W = 18;
+  constexpr int16_t ICON_RIGHT_PAD = 8;
+  constexpr int16_t ICON_GAP = 8;
+
+  int16_t iconRight = SCREEN_W - ICON_RIGHT_PAD;
+  int16_t iconCenterX = iconRight - ICON_W / 2;
+  int16_t valueRight = iconRight - ICON_W - ICON_GAP;
+  int16_t valueX =
+      valueRight - static_cast<int16_t>(std::strlen(value) * 6U * TEXT_SIZE);
+
+  g_canvas->setTextSize(TEXT_SIZE);
+  g_canvas->setTextColor(color);
+  g_canvas->setCursor(valueX, y);
+  g_canvas->print(value);
+
+  if (externalPing) {
+    drawRectGlobeIcon(iconCenterX, y + 12, color);
+  } else {
+    drawRectRouterIcon(iconCenterX, y + 12, color);
+  }
+}
+
+static void uiShowMainRect(const Telemetry &t) {
+  g_canvas->fillScreen(CLR_BG);
+
+  // --- Зона A: шапка (70px) ---
+  // Левая колонка: ROUTER + IP
+  // Центр: статус UP/DOWN
+  // Правая колонка: пинг до хоста + пинг до роутера
+
+  g_canvas->fillRect(0, ZONE_A_Y, SCREEN_W, ZONE_A_H, CLR_BG);
+
+  char routerTitle[48];
+  char routerInfo[32];
+  formatRouterInfo(t, routerTitle, sizeof(routerTitle),
+                   routerInfo, sizeof(routerInfo));
+
+  // ROUTER / UPTIME (textSize 3 = 18x24)
+  g_canvas->setTextSize(3);
+  g_canvas->setTextColor(CLR_DIM);
+  g_canvas->setCursor(8, ZONE_A_Y + 4);
+  g_canvas->print(routerTitle);
+
+  // IP роутера или uptime интерфейса внизу зоны.
+  g_canvas->setTextSize(3);
+  g_canvas->setTextColor(CLR_TEXT);
+  g_canvas->setCursor(8, ZONE_A_Y + 44);
+  g_canvas->print(routerInfo);
+
+  constexpr uint8_t RECT_STATUS_TEXT_SIZE = 3;
+  constexpr int16_t RECT_STATUS_Y = ZONE_A_Y + 44;
+  const char *rectStatusText = "----";
+  uint16_t rectStatusColor = CLR_DIM;
+  int16_t rectStatusX = 255;
+
+  if (t.dataValid) {
+    rectStatusColor = statusColorRect(t);
+    rectStatusText = statusText(t);
+    if (std::strcmp(rectStatusText, "UP") == 0) {
+      rectStatusText = " UP ";
+      rectStatusX = 275;
+    }
+  }
+
+  int16_t statusCenterX =
+      rectStatusX +
+      static_cast<int16_t>(std::strlen(rectStatusText) * 6U * RECT_STATUS_TEXT_SIZE) / 2;
+
+  if (t.interfaceAliasValid && t.interfaceAlias[0] != '\0') {
+    g_canvas->setTextSize(3);
+    g_canvas->setTextColor(CLR_TEXT);
+    int16_t aliasX =
+        statusCenterX -
+        static_cast<int16_t>(std::strlen(t.interfaceAlias) * 6U * 3U) / 2;
+    g_canvas->setCursor(aliasX, ZONE_A_Y + 4);
+    g_canvas->print(t.interfaceAlias);
+  }
+
+  g_canvas->setTextSize(RECT_STATUS_TEXT_SIZE);
+  g_canvas->setTextColor(rectStatusColor);
+  g_canvas->setCursor(rectStatusX, RECT_STATUS_Y);
+  g_canvas->print(rectStatusText);
+
+  // Правая колонка: пинги (textSize 3 = 18x24)
+  // Верхний: пинг до внешнего хоста
+  {
+    const char *pingStr = nullptr;
+    uint16_t pingColor  = CLR_PING;
+
+    if (!t.dataValid) {
+      static const char *frames[] = {"_-", "-_", "--"};
+      pingStr  = frames[(millis() / 500) % 3];
+      pingColor = CLR_DIM;
+    } else if (t.pingLoss) {
+      pingStr  = "loss";
+      pingColor = CLR_STATUS_DN;
+    } else if (t.pingMs == 0) {
+      pingStr  = "--";
+    } else {
+      snprintf(g_fmtBuf, sizeof(g_fmtBuf), "%u", t.pingMs);
+      pingStr = g_fmtBuf;
+    }
+
+    drawRectPingValue(pingStr, ZONE_A_Y + 4, pingColor, true);
+  }
+
+  // Нижний: пинг до роутера
+  {
+    const char *rStr;
+    char rBuf[16];
+    uint16_t routerPingColor = CLR_PING;
+    if (!t.dataValid) {
+      rStr = "--";
+      routerPingColor = CLR_DIM;
+    } else if (t.routerPingValid) {
+      snprintf(rBuf, sizeof(rBuf), "%u", t.routerPingMs);
+      rStr = rBuf;
+    } else {
+      rStr = "--";
+      routerPingColor = CLR_DIM;
+    }
+    drawRectPingValue(rStr, ZONE_A_Y + 44, routerPingColor, false);
+  }
+
+  // --- Зона B: трафик (одна строка) ---
+  g_canvas->fillRect(0, ZONE_B_Y, SCREEN_W, ZONE_B_H, CLR_BG);
+
+  {
+    const int16_t rowY = ZONE_B_Y + 16;
+
+    // Входящий (слева)
+    g_canvas->setTextSize(4);
+    g_canvas->setTextColor(g_colorPalette.incoming);
+    g_canvas->setCursor(12, rowY);
+    g_canvas->print("\x19 ");
+    {
+      char valBuf[16];
+      const char *unit = "bit";
+      if (t.inBps > 0.0) {
+        formatSpeedText(t.inBps, SpeedFormatStyle::RectValue, valBuf,
+                        sizeof(valBuf), &unit);
+        g_canvas->print(valBuf);
+      } else {
+        g_canvas->print("-");
+      }
+      int16_t ux = g_canvas->getCursorX();
+      g_canvas->setTextSize(3);
+      g_canvas->setCursor(ux, rowY + 8);
+      g_canvas->print(" ");
+      g_canvas->print(unit);
+    }
+
+    // Исходящий (левый край = центр экрана)
+    constexpr int16_t OUT_X = SCREEN_W / 2;
+    g_canvas->setTextSize(4);
+    g_canvas->setTextColor(g_colorPalette.outgoing);
+    g_canvas->setCursor(OUT_X, rowY);
+    g_canvas->print("\x18 ");
+    {
+      char valBuf[16];
+      const char *unit = "bit";
+      if (t.outBps > 0.0) {
+        formatSpeedText(t.outBps, SpeedFormatStyle::RectValue, valBuf,
+                        sizeof(valBuf), &unit);
+        g_canvas->print(valBuf);
+      } else {
+        g_canvas->print("-");
+      }
+      int16_t ux = g_canvas->getCursorX();
+      g_canvas->setTextSize(3);
+      g_canvas->setCursor(ux, rowY + 8);
+      g_canvas->print(" ");
+      g_canvas->print(unit);
+    }
+  }
+
+  // --- Зона C: графики трафика ---
+  {
+    constexpr int16_t OTA_H  = 24;
+    constexpr int16_t GX     = 0;
+    constexpr int16_t GY     = ZONE_C_Y;
+    constexpr int16_t GW     = SCREEN_W;
+    constexpr int16_t GH     = ZONE_C_H - OTA_H;
+    constexpr int16_t HALF_W = GW / 2;
+
+    g_canvas->fillRect(0, ZONE_C_Y, SCREEN_W, ZONE_C_H, CLR_BG);
+
+    if (g_histCount >= 2) {
+      float maxIn = 1.0f, maxOut = 1.0f;
+      uint16_t start = (g_histHead + GRAPH_POINTS - g_histCount) % GRAPH_POINTS;
+      for (uint16_t i = 0; i < g_histCount; i++) {
+        uint16_t idx = (start + i) % GRAPH_POINTS;
+        if (g_histIn[idx]  > maxIn)  maxIn  = g_histIn[idx];
+        if (g_histOut[idx] > maxOut) maxOut = g_histOut[idx];
+      }
+
+      float xStep = static_cast<float>(HALF_W) / static_cast<float>(GRAPH_POINTS - 1);
+      int16_t bottom = GY + GH - 1;
+
+      auto drawHalf = [&](const float *data, float maxVal, int16_t offsetX, uint16_t lineColor) {
+        int16_t prevPx = -1, prevPy = -1;
+        for (uint16_t i = 0; i < g_histCount; i++) {
+          uint16_t idx = (start + i) % GRAPH_POINTS;
+          int16_t px = offsetX + static_cast<int16_t>(i * xStep);
+          int16_t py = bottom - static_cast<int16_t>((data[idx] / maxVal) * (GH - 1));
+          if (prevPx >= 0) {
+            g_canvas->drawLine(prevPx, prevPy, px, py, lineColor);
+            g_canvas->drawLine(prevPx, prevPy + 1, px, py + 1, lineColor);
+          }
+          prevPx = px;
+          prevPy = py;
+        }
+      };
+
+      drawHalf(g_histIn, maxIn, GX, g_colorPalette.incoming);
+      drawHalf(g_histOut, maxOut, GX + HALF_W,
+               g_colorPalette.outgoing);
+
+      constexpr uint16_t CLR_LABEL_BG = 0x39E7;
+      constexpr int16_t PAD   = 4;
+      constexpr int16_t RAD   = 3;
+      constexpr int16_t CH_W  = 12;
+      constexpr int16_t CH_H  = 16;
+
+      auto drawPill = [&](float bps, int16_t px, int16_t py) {
+        char v[16];
+        const char *u = "bt";
+        formatSpeedText(bps, SpeedFormatStyle::GraphLabel, v, sizeof(v), &u);
+        int textLen = std::strlen(v) + 1 + std::strlen(u);
+        int16_t w = textLen * CH_W + PAD * 2;
+        int16_t h = CH_H + PAD * 2;
+        g_canvas->fillRoundRect(px, py, w, h, RAD, CLR_LABEL_BG);
+        g_canvas->setTextSize(2);
+        g_canvas->setTextColor(CLR_TEXT, CLR_LABEL_BG);
+        g_canvas->setCursor(px + PAD, py + PAD);
+        g_canvas->print(v);
+        g_canvas->print(" ");
+        g_canvas->print(u);
+      };
+
+      constexpr int16_t PILL_Y = GY + 2;
+      drawPill(maxIn,  GX + 4,          PILL_Y);
+      drawPill(maxOut, GX + HALF_W + 4, PILL_Y);
+    }
+
+    g_canvas->setTextSize(2);
+    g_canvas->setTextColor(CLR_DIM);
+    g_canvas->setCursor(8, ZONE_C_Y + ZONE_C_H - 18);
+    g_canvas->print("OTA: ");
+    g_canvas->print(WiFi.localIP().toString());
+  }
+
+  flush();
 }
 
 void uiShowMain(const Telemetry &t) {
-  g_gfx->fillScreen(CLR_BG);
-
-  // --- Зона A: шапка ---
-  fillZone(ZONE_A_Y, ZONE_A_H, CLR_BG);
-
-  g_gfx->setTextSize(2);
-  g_gfx->setTextColor(CLR_DIM);
-  g_gfx->setCursor(8, ZONE_A_Y + 4);
-  g_gfx->print("ROUTER");
-
-  g_gfx->setTextSize(3);
-  g_gfx->setTextColor(CLR_TEXT);
-  g_gfx->setCursor(8, ZONE_A_Y + 26);
-  g_gfx->print("192.168.1.1");
-
-  // Статус UP/DOWN
-  g_gfx->setTextSize(4);
-  if (t.dataValid) {
-    g_gfx->setTextColor(t.linkUp ? CLR_STATUS_UP : CLR_STATUS_DN);
-    g_gfx->setCursor(300, ZONE_A_Y + 10);
-    g_gfx->print(t.linkUp ? "UP" : "DOWN");
-  } else {
-    g_gfx->setTextColor(CLR_DIM);
-    g_gfx->setCursor(300, ZONE_A_Y + 10);
-    g_gfx->print("--");
-  }
-
-  // Пинг
-  g_gfx->setTextSize(3);
-  g_gfx->setTextColor(CLR_PING);
-  g_gfx->setCursor(430, ZONE_A_Y + 4);
-  if (t.pingValid) {
-    snprintf(g_fmtBuf, sizeof(g_fmtBuf), "%ums", t.pingMs);
-    g_gfx->print(g_fmtBuf);
-  } else {
-    g_gfx->print("-- ms");
-  }
-
-  // Разделитель
-  g_gfx->drawFastHLine(0, ZONE_A_Y + ZONE_A_H - 1, SCREEN_W, CLR_DIM);
-
-  // --- Зона B: трафик ---
-  fillZone(ZONE_B_Y, ZONE_B_H, CLR_BG);
-
-  g_gfx->setTextSize(4);
-  g_gfx->setTextColor(CLR_TRAFF_IN);
-  g_gfx->setCursor(12, ZONE_B_Y + 10);
-  g_gfx->print("\x19 ");
-  snprintf(g_fmtBuf, sizeof(g_fmtBuf), "%.1f", t.inMbps);
-  g_gfx->print(g_fmtBuf);
-
-  g_gfx->setTextSize(2);
-  g_gfx->setCursor(260, ZONE_B_Y + 18);
-  g_gfx->print("Mbps");
-
-  g_gfx->setTextSize(4);
-  g_gfx->setTextColor(CLR_TRAFF_OUT);
-  g_gfx->setCursor(12, ZONE_B_Y + 50);
-  g_gfx->print("\x18 ");
-  snprintf(g_fmtBuf, sizeof(g_fmtBuf), "%.1f", t.outMbps);
-  g_gfx->print(g_fmtBuf);
-
-  g_gfx->setTextSize(2);
-  g_gfx->setCursor(260, ZONE_B_Y + 58);
-  g_gfx->print("Mbps");
-
-  // Разделитель
-  g_gfx->drawFastHLine(0, ZONE_B_Y + ZONE_B_H - 1, SCREEN_W, CLR_DIM);
-
-  // --- Зона C: заглушка графика + OTA IP ---
-  fillZone(ZONE_C_Y, ZONE_C_H, CLR_BG);
-  g_gfx->setTextSize(2);
-  g_gfx->setTextColor(CLR_DIM);
-  g_gfx->setCursor(200, ZONE_C_Y + 35);
-  g_gfx->print("[graph]");
-
-  g_gfx->setTextSize(2);
-  g_gfx->setCursor(8, ZONE_C_Y + ZONE_C_H - 18);
-  g_gfx->print("OTA: ");
-  g_gfx->print(WiFi.localIP().toString());
+  if (!uiDisplayEnabled()) return;
+#if defined(HW_AMOLED_143)
+  uiShowMainRound(t);
+#else
+  uiShowMainRect(t);
+#endif
 }
 
-void uiUpdateMain(const Telemetry &t) {
-  uiShowMain(t);
+#if defined(HW_AMOLED_143)
+bool uiHandleTap(int16_t x, int16_t y) {
+  int32_t dx = static_cast<int32_t>(x) - RoundLayout::CENTER_X;
+  int32_t dy = static_cast<int32_t>(y) - RoundLayout::GLOBE_CENTER_Y;
+  int32_t distanceSquared = dx * dx + dy * dy;
+  int32_t radiusSquared =
+      static_cast<int32_t>(RoundLayout::GLOBE_RADIUS) *
+      RoundLayout::GLOBE_RADIUS;
+
+  if (distanceSquared <= radiusSquared) {
+    g_globeAnimationRunning = !g_globeAnimationRunning;
+    uint32_t now = millis();
+    g_lastGlobeFrameMs = now;
+    if (g_globeAnimationRunning && g_globeRestUntilMs != 0) {
+      g_globeRestUntilMs = 0;
+      g_globeFrame =
+          (g_globeFrame + 1) % static_cast<uint8_t>(GLOBE_FRAME_COUNT);
+    }
+    g_redrawRequested = true;
+    Serial.printf("[UI] globe animation -> %s\n",
+                  g_globeAnimationRunning ? "running" : "paused");
+    return false;
+  }
+
+  return true;
+}
+#endif
+
+bool uiDisplayEnabled() {
+  return g_brightness != BrightnessLevel::Off;
+}
+
+bool uiConsumeRedrawRequest() {
+  bool requested = g_redrawRequested;
+  g_redrawRequested = false;
+  return requested;
+}
+
+void uiSetBrightness(BrightnessLevel level) {
+  if (!g_bus || !isBrightnessLevelSupported(level, true)) return;
+
+  bool wasEnabled = uiDisplayEnabled();
+  uint8_t val = 0;
+  switch (level) {
+    case BrightnessLevel::Quarter:       val = 0x40; break;
+    case BrightnessLevel::Half:          val = 0x80; break;
+    case BrightnessLevel::ThreeQuarters: val = 0xBF; break;
+    case BrightnessLevel::Full:          val = 0xFF; break;
+    case BrightnessLevel::Off:           val = 0x00; break;
+  }
+
+  g_bus->beginWrite();
+  g_bus->writeC8D8(DISP_CMD_BRIGHTNESS, val);
+  if (val > 0) {
+    g_bus->writeCommand(DISP_CMD_DISPON);
+  } else {
+    g_bus->writeCommand(DISP_CMD_DISPOFF);
+  }
+  g_bus->endWrite();
+  g_brightness = level;
+  if (!wasEnabled && val > 0) {
+    g_redrawRequested = true;
+  }
+  Serial.printf("[UI] brightness -> %u%% (0x%02X)\n",
+                static_cast<unsigned>(level), val);
+}
+
+BrightnessLevel uiBrightness() {
+  return g_brightness;
 }

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NETMONITOR OTA</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,sans-serif;background:#1a1a2e;color:#eee;
+  margin:0;padding:16px}
+h1{color:#07ff;text-align:center;margin:12px 0}
+.card{max-width:640px;margin:12px auto;background:#16213e;
+  border-radius:10px;padding:16px}
+.mode{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+.mode label{background:#252d4c;border:1px solid #3b456d;border-radius:8px;
+  padding:12px;cursor:pointer}
+.mode label:has(input:checked){border-color:#07ff;color:#07ff}
+.field{margin-top:12px}
+.field label{display:block;margin-bottom:6px;color:#bbb}
+input[type=file]{width:100%;padding:10px;background:#10172d;color:#ddd;
+  border:1px solid #3b456d;border-radius:8px}
+.btn{display:block;width:100%;padding:14px;margin-top:12px;background:#07ff;
+  color:#000;border:0;border-radius:8px;font-size:17px;font-weight:700;
+  cursor:pointer;text-align:center}
+.btn:hover{background:#05d}.btn:disabled{background:#555;cursor:not-allowed}
+.secondary{background:#555;color:#fff}.danger{background:#b33;color:#fff}
+.back{max-width:640px;margin:8px auto;text-decoration:none}
+.hidden{display:none}
+#bar{height:22px;background:#333;border-radius:11px;margin-top:14px;overflow:hidden}
+#fill{height:100%;width:0;background:#07ff;transition:width .15s}
+#msg{min-height:42px;text-align:center;margin-top:10px;color:#bbb;
+  white-space:pre-wrap}
+#release{font-size:13px;color:#8993b3;text-align:center}
+</style>
+</head>
+<body>
+<h1>NETMONITOR OTA</h1>
+<div class="card">
+  <div id="release">Loading update status…</div>
+  <div class="mode">
+    <label><input type="radio" name="mode" value="firmware" checked>
+      Firmware only</label>
+    <label><input type="radio" name="mode" value="bundle">
+      Firmware + LittleFS</label>
+  </div>
+  <div class="field">
+    <label for="firmware">Firmware image</label>
+    <input type="file" id="firmware" accept=".bin">
+  </div>
+  <div class="field hidden" id="fsField">
+    <label for="filesystem">LittleFS image</label>
+    <input type="file" id="filesystem" accept=".bin">
+  </div>
+  <button class="btn" id="start">Start update</button>
+  <button class="btn secondary hidden" id="cancel">Cancel</button>
+  <button class="btn danger hidden" id="rollback">Rollback previous release</button>
+  <div id="bar"><div id="fill"></div></div>
+  <div id="msg">Select update mode and image files.</div>
+</div>
+<a class="btn secondary back" href="/">Back to Settings</a>
+<script>
+const $=id=>document.getElementById(id);
+const start=$('start'),cancel=$('cancel'),rollback=$('rollback');
+let busy=false;
+
+function mode(){return document.querySelector('input[name=mode]:checked').value}
+function message(text){$('msg').textContent=text}
+function progress(value){$('fill').style.width=Math.max(0,Math.min(100,value))+'%'}
+function setBusy(value){
+  busy=value;start.disabled=value;
+  document.querySelectorAll('input').forEach(x=>x.disabled=value);
+  cancel.classList.toggle('hidden',!value);
+}
+function updateMode(){
+  $('fsField').classList.toggle('hidden',mode()!=='bundle');
+}
+document.querySelectorAll('input[name=mode]').forEach(x=>x.onchange=updateMode);
+
+async function textOrThrow(response){
+  if(response.ok)return response;
+  throw new Error((await response.text())||('HTTP '+response.status));
+}
+async function getStatus(){
+  const response=await textOrThrow(await fetch('/api/ota/status',{cache:'no-store'}));
+  return response.json();
+}
+function showStatus(status){
+  $('release').textContent='App slot: '+status.runningApp+
+    ' · FS: '+status.activeFs+' · State: '+status.state;
+  rollback.classList.toggle('hidden',busy||!status.rollbackAvailable);
+  if(!busy&&status.error)message(status.error);
+}
+function sha256Bytes(bytes){
+  const k=[
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+  ];
+  const hash=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+    0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const size=Math.ceil((bytes.length+9)/64)*64;
+  const data=new Uint8Array(size);data.set(bytes);data[bytes.length]=0x80;
+  const view=new DataView(data.buffer);
+  view.setUint32(size-8,Math.floor(bytes.length/0x20000000));
+  view.setUint32(size-4,(bytes.length*8)>>>0);
+  const w=new Uint32Array(64);
+  const rotr=(x,n)=>(x>>>n)|(x<<(32-n));
+  for(let offset=0;offset<size;offset+=64){
+    for(let i=0;i<16;i++)w[i]=view.getUint32(offset+i*4);
+    for(let i=16;i<64;i++){
+      const s0=rotr(w[i-15],7)^rotr(w[i-15],18)^(w[i-15]>>>3);
+      const s1=rotr(w[i-2],17)^rotr(w[i-2],19)^(w[i-2]>>>10);
+      w[i]=(w[i-16]+s0+w[i-7]+s1)>>>0;
+    }
+    let [a,b,c,d,e,f,g,h]=hash;
+    for(let i=0;i<64;i++){
+      const s1=rotr(e,6)^rotr(e,11)^rotr(e,25);
+      const ch=(e&f)^(~e&g);
+      const t1=(h+s1+ch+k[i]+w[i])>>>0;
+      const s0=rotr(a,2)^rotr(a,13)^rotr(a,22);
+      const maj=(a&b)^(a&c)^(b&c);
+      const t2=(s0+maj)>>>0;
+      h=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;
+    }
+    hash[0]=(hash[0]+a)>>>0;hash[1]=(hash[1]+b)>>>0;
+    hash[2]=(hash[2]+c)>>>0;hash[3]=(hash[3]+d)>>>0;
+    hash[4]=(hash[4]+e)>>>0;hash[5]=(hash[5]+f)>>>0;
+    hash[6]=(hash[6]+g)>>>0;hash[7]=(hash[7]+h)>>>0;
+  }
+  return hash.map(x=>x.toString(16).padStart(8,'0')).join('');
+}
+async function sha256(file){
+  return sha256Bytes(new Uint8Array(await file.arrayBuffer()));
+}
+async function waitUntilReady(){
+  const deadline=Date.now()+30000;
+  while(Date.now()<deadline){
+    const status=await getStatus();showStatus(status);
+    if(status.state==='failed')throw new Error(status.error||'OTA preparation failed');
+    if(status.ready)return;
+    await new Promise(resolve=>setTimeout(resolve,250));
+  }
+  throw new Error('Timed out while stopping telemetry');
+}
+function upload(type,file,from,to){
+  return new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST','/api/ota/upload?type='+encodeURIComponent(type)+
+      '&size='+file.size,true);
+    xhr.upload.onprogress=e=>{
+      if(e.lengthComputable)progress(from+(to-from)*e.loaded/e.total);
+    };
+    xhr.onload=()=>{
+      if(xhr.status>=200&&xhr.status<300)resolve();
+      else reject(new Error(xhr.responseText||('HTTP '+xhr.status)));
+    };
+    xhr.onerror=()=>reject(new Error('Network error during '+type+' upload'));
+    const form=new FormData();
+    form.append('image',file,file.name);
+    xhr.send(form);
+  });
+}
+async function runUpdate(){
+  if(busy)return;
+  const firmware=$('firmware').files[0];
+  const filesystem=$('filesystem').files[0];
+  if(!firmware){message('Select firmware.bin');return}
+  if(mode()==='bundle'&&!filesystem){message('Select littlefs.bin');return}
+  setBusy(true);progress(0);
+  try{
+    message('Calculating SHA-256…');
+    const request={
+      mode:mode(),
+      firmwareSize:firmware.size,
+      firmwareSha256:await sha256(firmware)
+    };
+    if(filesystem){
+      request.filesystemSize=filesystem.size;
+      request.filesystemSha256=await sha256(filesystem);
+    }
+    await textOrThrow(await fetch('/api/ota/start',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(request)
+    }));
+    message('Preparing device…');
+    await waitUntilReady();
+    if(mode()==='bundle'){
+      message('Uploading LittleFS…');
+      await upload('filesystem',filesystem,0,45);
+    }
+    message('Uploading firmware…');
+    await upload('firmware',firmware,mode()==='bundle'?45:0,90);
+    message('Committing release…');
+    await textOrThrow(await fetch('/api/ota/commit',{method:'POST'}));
+    progress(100);message('Update committed. Device is rebooting…');
+  }catch(error){
+    message('Update failed: '+error.message);
+    try{await fetch('/api/ota/cancel',{method:'POST'})}catch(_){}
+    setBusy(false);
+    try{showStatus(await getStatus())}catch(_){}
+  }
+}
+async function cancelUpdate(){
+  try{
+    await textOrThrow(await fetch('/api/ota/cancel',{method:'POST'}));
+    message('Update cancelled.');progress(0);
+  }catch(error){message('Cancel failed: '+error.message)}
+  setBusy(false);
+  try{showStatus(await getStatus())}catch(_){}
+}
+async function rollbackRelease(){
+  if(!confirm('Boot the previous firmware and LittleFS release?'))return;
+  rollback.disabled=true;
+  try{
+    await textOrThrow(await fetch('/api/ota/rollback',{method:'POST'}));
+    message('Rollback scheduled. Device is rebooting…');
+  }catch(error){
+    message('Rollback failed: '+error.message);
+    rollback.disabled=false;
+  }
+}
+start.onclick=runUpdate;cancel.onclick=cancelUpdate;rollback.onclick=rollbackRelease;
+getStatus().then(showStatus).catch(error=>message(error.message));
+</script>
+</body>
+</html>

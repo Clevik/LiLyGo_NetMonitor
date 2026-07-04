@@ -1,11 +1,17 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <LittleFS.h>
 
 #include "config.h"
 #include "settings.h"
+#include "display/power_manager.h"
 #include "display/ui.h"
 #include "portal/portal.h"
 #include "net/ota.h"
+#include "net/ota_state.h"
+#include "net/telemetry.h"
+#include "net/time_service.h"
+#include "touch/touch.h"
 
 enum class AppState : uint8_t {
   Boot,
@@ -17,10 +23,26 @@ enum class AppState : uint8_t {
 static AppState   g_state = AppState::Boot;
 static Settings   g_settings;
 static Telemetry  g_telemetry;
+static bool       g_filesystemReady = false;
 
 static uint32_t   g_stateEnteredMs = 0;
-static uint32_t   g_lastPollMs     = 0;
+static uint32_t   g_lastUiMs       = 0;
+static uint32_t   g_lastTelemetryMs = 0;
 static uint32_t   g_keyDownMs      = 0;
+static bool       g_keyWakeOnly    = false;
+
+#if defined(HW_AMOLED_143)
+static constexpr uint32_t UI_RUNNING_FRAME_MS = UI_ROUND_FRAME_MS;
+#else
+static constexpr uint32_t UI_RUNNING_FRAME_MS = 500;
+#endif
+static constexpr uint32_t TELEMETRY_SNAPSHOT_MS = 500;
+
+// Ретрай Wi-Fi внутри состояния WifiConnect.
+static bool       g_wifiWaiting    = false;  // идёт ли пауза между попытками
+static uint32_t   g_nextAttemptMs  = 0;      // момент следующей попытки
+static uint32_t   g_lastWaitSec    = 0;      // последний показанный остаток (сек)
+static uint32_t   g_lastWaitUiMs   = 0;      // когда последний раз перерисовывали ожидание
 
 static void enterState(AppState next) {
   if (g_state == AppState::ApConfig && next != AppState::ApConfig) {
@@ -28,6 +50,9 @@ static void enterState(AppState next) {
   }
   if (g_state == AppState::Running && next != AppState::Running) {
     otaEnd();
+    if (!telemetryStop()) {
+      Serial.println("[FSM] telemetry stop did not finish before state change");
+    }
   }
 
   g_state = next;
@@ -42,6 +67,8 @@ static void enterState(AppState next) {
 
     case AppState::WifiConnect:
       Serial.println("[FSM] -> WIFI_CONNECT");
+      g_wifiWaiting = false;
+      g_nextAttemptMs = 0;
       WiFi.mode(WIFI_STA);
       WiFi.begin(g_settings.wifiSsid.c_str(), g_settings.wifiPassword.c_str());
       uiShowConnecting(g_settings.wifiSsid.c_str());
@@ -49,8 +76,14 @@ static void enterState(AppState next) {
 
     case AppState::Running:
       Serial.println("[FSM] -> RUNNING");
-      g_lastPollMs = 0;
-      otaBegin();
+      g_lastUiMs = 0;
+      g_lastTelemetryMs = 0;
+      otaBegin(g_settings);
+      timeServiceBegin(g_settings.powerSave.timeZone);
+      uiSetRouterIp(g_settings.routerHost.c_str());
+      if (!telemetryStart(g_settings)) {
+        Serial.println("[FSM] telemetry start skipped");
+      }
       uiShowMain(g_telemetry);
       break;
 
@@ -62,19 +95,20 @@ static void enterState(AppState next) {
 static bool keyLongPressed() {
   bool pressed = (digitalRead(PIN_KEY) == LOW);
   if (pressed) {
-    if (g_keyDownMs == 0) g_keyDownMs = millis();
-    if (millis() - g_keyDownMs >= KEY_LONG_PRESS_MS) {
+    if (g_keyDownMs == 0) {
+      g_keyDownMs = millis();
+      g_keyWakeOnly = powerManagerHandleActivity(g_keyDownMs);
+    }
+    if (!g_keyWakeOnly &&
+        millis() - g_keyDownMs >= KEY_LONG_PRESS_MS) {
       g_keyDownMs = 0;
       return true;
     }
   } else {
     g_keyDownMs = 0;
+    g_keyWakeOnly = false;
   }
   return false;
-}
-
-static void pollTelemetry() {
-  // TODO: SNMP + ping
 }
 
 void setup() {
@@ -82,31 +116,82 @@ void setup() {
   delay(200);
   Serial.println("\n[NETMONITOR] boot");
 
+  OtaFsSlot fsSlot = OtaFsSlot::Fs0;
+  otaStatePrepareBoot(fsSlot);
+
+  bool haveConfig = SettingsStore::load(g_settings);
+
+  if (!LittleFS.begin(false, "/littlefs", 10,
+                      otaFsPartitionLabel(fsSlot))) {
+    Serial.println("[FS] LittleFS mount failed");
+    otaStateHandleFilesystemFailure();
+  } else if (!otaStateValidateFilesystem(LittleFS)) {
+    Serial.println("[FS] LittleFS validation failed");
+    LittleFS.end();
+    otaStateHandleFilesystemFailure();
+  } else {
+    g_filesystemReady = true;
+  }
+
   pinMode(PIN_KEY, INPUT_PULLUP);
 
-  if (!uiInit()) {
+#if !defined(HW_AMOLED_143)
+  touchInit(g_settings.displayRotation);
+#endif
+
+  if (!uiInit(g_settings.displayRotation,
+              g_settings.colorScheme,
+              g_settings.powerSave.startupBrightness)) {
     Serial.println("[UI] display init failed, halting");
     while (true) delay(1000);
   }
+
+#if defined(HW_AMOLED_143)
+  delay(50);
+  if (!touchInit(g_settings.displayRotation)) {
+    Serial.println("[Touch] initialization failed");
+  }
+#endif
+
+  powerManagerBegin(g_settings.powerSave, millis());
   uiShowSplash();
   delay(1500);
 
-  bool haveConfig = SettingsStore::load(g_settings);
   enterState(haveConfig ? AppState::WifiConnect : AppState::ApConfig);
 }
 
 void loop() {
   const uint32_t now = millis();
+  otaStateTick(now, g_filesystemReady);
+  powerManagerTick(now);
 
   if (g_state == AppState::Running || g_state == AppState::WifiConnect) {
     if (keyLongPressed()) {
       Serial.println("[FSM] KEY long press -> reset config");
       SettingsStore::clear();
       g_settings = Settings{};
+      uiApplyDisplaySettings(g_settings.displayRotation,
+                             g_settings.colorScheme);
+      powerManagerApplySettings(g_settings.powerSave, now);
+      touchSetRotation(g_settings.displayRotation);
       WiFi.disconnect(true, true);
       enterState(AppState::ApConfig);
       return;
     }
+  }
+
+  if (g_state != AppState::Running) {
+#if defined(HW_AMOLED_143)
+    int16_t touchX = 0;
+    int16_t touchY = 0;
+    if (touchReadTap(touchX, touchY)) {
+      powerManagerHandleActivity(now);
+    }
+#else
+    if (touchButtonPressed()) {
+      powerManagerHandleActivity(now);
+    }
+#endif
   }
 
   switch (g_state) {
@@ -115,6 +200,10 @@ void loop() {
       if (portalConfigSaved()) {
         Serial.println("[Portal] config saved, connecting...");
         SettingsStore::save(g_settings);
+        uiApplyDisplaySettings(g_settings.displayRotation,
+                               g_settings.colorScheme);
+        powerManagerApplySettings(g_settings.powerSave, now);
+        touchSetRotation(g_settings.displayRotation);
         enterState(AppState::WifiConnect);
       }
       break;
@@ -124,26 +213,108 @@ void loop() {
       if (WiFi.status() == WL_CONNECTED) {
         Serial.print("[WiFi] connected, IP: ");
         Serial.println(WiFi.localIP());
+        g_wifiWaiting = false;
         enterState(AppState::Running);
-      } else if (now - g_stateEnteredMs > WIFI_CONNECT_TIMEOUT) {
-        Serial.println("[WiFi] connect timeout -> AP_CONFIG");
+        break;
+      }
+
+      if (g_wifiWaiting) {
+        // Пауза между попытками: показываем обратный отсчёт и ждём.
+        uint32_t remainMs = (g_nextAttemptMs > now) ? (g_nextAttemptMs - now) : 0;
+        uint32_t remainSec = (remainMs + 500) / 1000;
+        if (now - g_lastWaitUiMs >= 500 || remainSec != g_lastWaitSec) {
+          g_lastWaitUiMs = now;
+          g_lastWaitSec = remainSec;
+          uiShowReconnectWait(g_settings.wifiSsid.c_str(), remainSec);
+        }
+        if (now >= g_nextAttemptMs) {
+          Serial.println("[WiFi] retry attempt");
+          g_wifiWaiting = false;
+          WiFi.disconnect(true, true);
+          WiFi.mode(WIFI_STA);
+          WiFi.begin(g_settings.wifiSsid.c_str(),
+                     g_settings.wifiPassword.c_str());
+          g_stateEnteredMs = now;
+          uiShowConnecting(g_settings.wifiSsid.c_str());
+        }
+        break;
+      }
+
+      // Идёт попытка подключения.
+      if (now - g_stateEnteredMs > WIFI_CONNECT_TIMEOUT) {
+        Serial.printf("[WiFi] connect timeout, retry in %u s\n",
+                      static_cast<unsigned>(g_settings.wifiRetryDelaySec));
         WiFi.disconnect(true, true);
-        enterState(AppState::ApConfig);
+        g_wifiWaiting = true;
+        g_nextAttemptMs = now + g_settings.wifiRetryDelaySec * 1000ULL;
+        g_lastWaitSec = 0xFFFFFFFF;
+        g_lastWaitUiMs = 0;
+      } else {
+        uiUpdateConnecting();
       }
       break;
     }
 
     case AppState::Running: {
+      otaLoop(g_settings);
+      if (otaSettingsSaved()) {
+        Serial.println("[OTA] settings saved");
+        SettingsStore::save(g_settings);
+        uiApplyDisplaySettings(g_settings.displayRotation,
+                               g_settings.colorScheme);
+        powerManagerApplySettings(g_settings.powerSave, now);
+        touchSetRotation(g_settings.displayRotation);
+        if (otaTelemetrySettingsChanged()) {
+          Serial.println("[OTA] telemetry settings changed, restarting telemetry...");
+          if (telemetryStop()) {
+            if (!telemetryStart(g_settings)) {
+              Serial.println("[OTA] telemetry restart skipped");
+            }
+            uiSetRouterIp(g_settings.routerHost.c_str());
+            g_lastTelemetryMs = 0;
+          } else {
+            Serial.println("[OTA] telemetry restart skipped: old task is still stopping");
+          }
+        }
+        g_lastUiMs = 0;
+      }
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[WiFi] lost -> reconnect");
         enterState(AppState::WifiConnect);
         break;
       }
-      const uint32_t intervalMs = g_settings.updateIntervalSec * 1000UL;
-      if (g_lastPollMs == 0 || now - g_lastPollMs >= intervalMs) {
-        g_lastPollMs = now;
-        pollTelemetry();
-        uiUpdateMain(g_telemetry);
+
+#if defined(HW_AMOLED_143)
+      {
+        int16_t touchX = 0;
+        int16_t touchY = 0;
+        if (touchReadTap(touchX, touchY)) {
+          bool wakeConsumed = powerManagerHandleActivity(now);
+          if (!wakeConsumed && uiHandleTap(touchX, touchY)) {
+            powerManagerCycleManualBrightness(now);
+          }
+        }
+      }
+#else
+      if (touchButtonPressed()) {
+        if (!powerManagerHandleActivity(now)) {
+          powerManagerCycleManualBrightness(now);
+        }
+      }
+#endif
+
+      bool redrawRequested = uiConsumeRedrawRequest();
+      if (g_lastTelemetryMs == 0 || now - g_lastTelemetryMs >= TELEMETRY_SNAPSHOT_MS) {
+        g_lastTelemetryMs = now;
+        g_telemetry = telemetrySnapshot();
+        uiObserveTelemetry(g_telemetry);
+      }
+
+      uint32_t uiFrameMs = uiDisplayEnabled() ? UI_RUNNING_FRAME_MS : 0;
+      if (uiFrameMs > 0 &&
+          (redrawRequested || g_lastUiMs == 0 || now - g_lastUiMs >= uiFrameMs)) {
+        g_lastUiMs = now;
+        uiShowMain(g_telemetry);
       }
       break;
     }
