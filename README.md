@@ -30,12 +30,9 @@ The dashboard includes:
 |--------|----------------------|------------------------|
 | LILYGO T-Display-S3 AMOLED 1.91″ | 536×240 rectangular AMOLED, RM67162, CST816T | `LILYGO-T-Display-S3-Sqr` |
 | LILYGO T-Display-S3 AMOLED 1.75″ Round | 466×466 round AMOLED, CO5300, CST9217 | `LILYGO-T-Display-S3-1-75-Round` |
-| LILYGO T-Display-S3 AMOLED 1.43″ Round, display revision `DO0143FMST10` | 466×466 round AMOLED, CO5300 | `LILYGO-T-Display-S3-1-75-Round` |
 
-The older 1.43″ display revision `DO0143FAT01` uses the SH8601 controller and
-is not supported by the pinned Arduino_GFX 1.4.9 dependency. The 1.43″ and
-1.75″ CO5300 boards share the same firmware environment; CST9217 touch support
-is configured for the 1.75″ revision.
+Other T-Display-S3 AMOLED sizes and display-controller revisions are not part
+of the supported release matrix.
 
 ### First-time Setup
 
@@ -153,12 +150,9 @@ the application and its selected filesystem are rolled back.
 |-------------|----------------------|----------------------|
 | LILYGO T-Display-S3 AMOLED 1.91″ | Прямоугольный AMOLED 536×240, RM67162, CST816T | `LILYGO-T-Display-S3-Sqr` |
 | LILYGO T-Display-S3 AMOLED 1.75″ Round | Круглый AMOLED 466×466, CO5300, CST9217 | `LILYGO-T-Display-S3-1-75-Round` |
-| LILYGO T-Display-S3 AMOLED 1.43″ Round, ревизия дисплея `DO0143FMST10` | Круглый AMOLED 466×466, CO5300 | `LILYGO-T-Display-S3-1-75-Round` |
 
-Старая ревизия дисплея 1.43″ `DO0143FAT01` использует контроллер SH8601 и не
-поддерживается зафиксированной в проекте библиотекой Arduino_GFX 1.4.9. Платы
-1.43″ и 1.75″ с CO5300 собираются одним окружением; поддержка сенсора CST9217
-настроена для ревизии 1.75″.
+Другие размеры T-Display-S3 AMOLED и ревизии контроллеров дисплея не входят в
+поддерживаемую релизную матрицу.
 
 ### Первый запуск
 
